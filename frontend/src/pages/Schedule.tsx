@@ -24,6 +24,12 @@ import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import ScheduleIcon from '@mui/icons-material/Schedule'
+import MeetingRoomIcon from '@mui/icons-material/MeetingRoom'
+import PersonIcon from '@mui/icons-material/Person'
+import GroupsIcon from '@mui/icons-material/Groups'
+import SchoolIcon from '@mui/icons-material/School'
 import api from '../api/client'
 import type {
   ScheduledLessonDetail,
@@ -32,6 +38,7 @@ import type {
   Room,
   StudentBase,
   ConflictDetail,
+  Price,
 } from '../api/types'
 import { DayNames, DayNamesFull } from '../api/types'
 
@@ -76,6 +83,10 @@ export default function Schedule() {
   const [students, setStudents] = useState<StudentBase[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [prices, setPrices] = useState<Price[]>([])
+
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLesson, setDetailLesson] = useState<ScheduledLessonDetail | null>(null)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editForm, setEditForm] = useState({
@@ -117,16 +128,18 @@ export default function Schedule() {
     if (!selectedScheduleId) return
     setLoading(true)
     try {
-      const [lRes, tRes, rRes, sRes] = await Promise.all([
+      const [lRes, tRes, rRes, sRes, pRes] = await Promise.all([
         api.get(`/schedules/${selectedScheduleId}/lessons`),
         api.get('/teachers'),
         api.get('/rooms'),
         api.get('/students'),
+        api.get('/prices'),
       ])
       setLessons(lRes.data as ScheduledLessonDetail[])
       setTeachers(tRes.data as Teacher[])
       setRooms(rRes.data as Room[])
       setStudents(sRes.data as StudentBase[])
+      setPrices(pRes.data as Price[])
     } catch {
       setSnackbar({ open: true, msg: 'Ошибка загрузки расписания', severity: 'error' })
     }
@@ -321,6 +334,25 @@ export default function Schedule() {
     }
     return ''
   }
+  const openDetailDialog = (lesson: ScheduledLessonDetail) => {
+    setDetailLesson(lesson)
+    setDetailOpen(true)
+  }
+  const formatMoney = (v: number) => `${v.toLocaleString('ru-RU')} ₽`
+  const getLessonPrice = (lesson: ScheduledLessonDetail) => {
+    const subjectId = lesson.lesson_request?.subject_id ?? lesson.group_lesson?.subject_id ?? null
+    if (subjectId === null) return null
+    const candidates = prices.filter(
+      (p) => p.subject_id === subjectId && p.lesson_type === lesson.lesson_type,
+    )
+    if (lesson.lesson_type === 'individual') {
+      const p = candidates.find((c) => c.min_participants <= 1 && c.max_participants >= 1) ?? candidates[0]
+      return p ? { perStudent: p.price_per_student, count: 1, total: p.price_per_student } : null
+    }
+    const count = lesson.group_lesson?.participants?.length ?? 0
+    const p = candidates.find((c) => count >= c.min_participants && count <= c.max_participants) ?? candidates[0]
+    return p ? { perStudent: p.price_per_student, count, total: p.price_per_student * count } : null
+  }
 
   const currentSchedule = schedules.find((s) => s.id === selectedScheduleId)
 
@@ -466,6 +498,8 @@ export default function Schedule() {
                       draggable
                       onDragStart={(e) => handleDragStart(e, lesson)}
                       onDragEnd={handleDragEnd}
+                      onClick={() => { if (!dragRef.current) openDetailDialog(lesson) }}
+                      title="Нажмите, чтобы увидеть подробности"
                       sx={{
                         position: 'absolute',
                         top: `${top}px`,
@@ -476,6 +510,7 @@ export default function Schedule() {
                         borderLeft: lesson.lesson_type === 'individual' ? '4px solid #1565c0' : '4px solid #6a1b9a',
                         overflow: 'hidden',
                         cursor: 'grab',
+                        userSelect: 'none',
                         '&:hover': { boxShadow: 3 },
                         p: 0.5,
                         fontSize: 11,
@@ -486,6 +521,14 @@ export default function Schedule() {
                           {lesson.start_time}–{lesson.end_time}
                         </Typography>
                         <Box>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => { e.stopPropagation(); openDetailDialog(lesson) }}
+                            sx={{ p: 0 }}
+                            title="Подробнее"
+                          >
+                            <InfoOutlinedIcon sx={{ fontSize: 14 }} />
+                          </IconButton>
                           <IconButton
                             size="small"
                             onClick={(e) => { e.stopPropagation(); openEditDialog(lesson) }}
@@ -529,6 +572,92 @@ export default function Schedule() {
           ))}
         </Box>
       )}
+
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="sm" fullWidth>
+        {detailLesson && (
+          <>
+            <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', pb: 1 }}>
+              <Chip
+                label={detailLesson.lesson_type === 'individual' ? 'Индивидуальное' : `Групповое${detailLesson.group_lesson?.participants?.length ? ` · ${detailLesson.group_lesson.participants.length} чел.` : ''}`}
+                color={detailLesson.lesson_type === 'individual' ? 'primary' : 'secondary'}
+                size="small"
+              />
+              <Typography variant="h6">{getSubjectFromLesson(detailLesson)}</Typography>
+            </DialogTitle>
+            <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.2 }}>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <ScheduleIcon fontSize="small" color="action" />
+                <Typography>
+                  {DayNamesFull[detailLesson.day_of_week]} · {detailLesson.start_time}–{detailLesson.end_time}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <PersonIcon fontSize="small" color="action" />
+                <Typography>
+                  Педагог:{' '}
+                  {detailLesson.teacher
+                    ? `${detailLesson.teacher.last_name} ${detailLesson.teacher.first_name}`
+                    : getTeacherName(detailLesson.teacher_id)}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <MeetingRoomIcon fontSize="small" color="action" />
+                <Typography>
+                  Кабинет: {detailLesson.room ? detailLesson.room.name : getRoomName(detailLesson.room_id)}
+                </Typography>
+              </Box>
+              {detailLesson.lesson_type === 'individual' && detailLesson.student && (
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <SchoolIcon fontSize="small" color="action" />
+                  <Typography>
+                    Ребёнок: {detailLesson.student.last_name} {detailLesson.student.first_name}
+                  </Typography>
+                </Box>
+              )}
+              {detailLesson.lesson_type === 'group' && detailLesson.group_lesson && (
+                <Box>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
+                    <GroupsIcon fontSize="small" color="action" />
+                    <Typography>Участники ({detailLesson.group_lesson.participants.length}):</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {detailLesson.group_lesson.participants.map((p) => (
+                      <Chip key={p.id} size="small" label={`${p.last_name} ${p.first_name}`} />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              {(() => {
+                const pr = getLessonPrice(detailLesson)
+                if (!pr) return null
+                return (
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1 }}>
+                    <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+                      {detailLesson.lesson_type === 'group'
+                        ? `${formatMoney(pr.perStudent)} / чел. · всего ${formatMoney(pr.total)}`
+                        : `Стоимость: ${formatMoney(pr.total)}`}
+                    </Typography>
+                  </Box>
+                )
+              })()}
+              {detailLesson.group_lesson?.comment && (
+                <Typography variant="body2" color="text.secondary">
+                  Комментарий: {detailLesson.group_lesson.comment}
+                </Typography>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setDetailOpen(false)}>Закрыть</Button>
+              <Button color="error" onClick={() => { setDetailOpen(false); handleDeleteLesson(detailLesson.id) }}>
+                Удалить
+              </Button>
+              <Button variant="contained" onClick={() => { setDetailOpen(false); openEditDialog(detailLesson) }}>
+                Редактировать
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
 
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Редактировать занятие</DialogTitle>
