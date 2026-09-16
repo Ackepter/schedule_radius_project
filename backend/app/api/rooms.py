@@ -98,7 +98,28 @@ def update_room(
 def delete_room(room_id: int, db: Session = Depends(get_db)):
     obj = db.get(Room, room_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Room not found")
-    db.delete(obj)
-    db.commit()
-    return MessageResponse(message="Room deleted")
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+    from app.models.entities import ScheduledLesson
+
+    ref_lessons = (
+        db.query(ScheduledLesson).filter(ScheduledLesson.room_id == room_id).count()
+    )
+    if ref_lessons:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Нельзя удалить кабинет: в расписании есть {ref_lessons} "
+                "занятий в этом кабинете. Сначала удалите их из расписания."
+            ),
+        )
+    try:
+        db.delete(obj)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Нельзя удалить кабинет: есть связанные данные. "
+            "Удалите связанные записи и повторите.",
+        ) from exc
+    return MessageResponse(message="Кабинет удалён")

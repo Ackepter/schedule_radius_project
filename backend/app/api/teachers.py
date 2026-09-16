@@ -98,7 +98,30 @@ def update_teacher(
 def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
     obj = db.get(Teacher, teacher_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-    db.delete(obj)
-    db.commit()
-    return MessageResponse(message="Teacher deleted")
+        raise HTTPException(status_code=404, detail="Педагог не найден")
+    from app.models.entities import ScheduledLesson
+
+    ref_lessons = (
+        db.query(ScheduledLesson)
+        .filter(ScheduledLesson.teacher_id == teacher_id)
+        .count()
+    )
+    if ref_lessons:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Нельзя удалить педагога: в расписании есть {ref_lessons} "
+                "занятий с этим педагогом. Сначала удалите их из расписания."
+            ),
+        )
+    try:
+        db.delete(obj)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Нельзя удалить педагога: есть связанные данные. "
+            "Удалите связанные записи (требования, группы) и повторите.",
+        ) from exc
+    return MessageResponse(message="Педагог удалён")
