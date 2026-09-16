@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.pyc
+test_sqlite.db
+test_pytest.db
+dev.db
+.env
+.git
+.vscode
+*.md
+!requirements.txt
