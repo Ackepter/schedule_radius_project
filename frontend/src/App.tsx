@@ -9,6 +9,7 @@ import {
   Toolbar,
   Typography,
   Box,
+  Divider,
 } from '@mui/material'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import SchoolIcon from '@mui/icons-material/School'
@@ -18,6 +19,7 @@ import MeetingRoomIcon from '@mui/icons-material/MeetingRoom'
 import GroupsIcon from '@mui/icons-material/Groups'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance'
+import DeveloperModeIcon from '@mui/icons-material/DeveloperMode'
 import Dashboard from './pages/Dashboard'
 import Students from './pages/Students'
 import Teachers from './pages/Teachers'
@@ -26,10 +28,11 @@ import Rooms from './pages/Rooms'
 import GroupLessons from './pages/GroupLessons'
 import Schedule from './pages/Schedule'
 import Finance from './pages/Finance'
+import Developer from './pages/Developer'
 
 const DRAWER_WIDTH = 260
 
-const NAV_ITEMS = [
+const MAIN_NAV_ITEMS = [
   { label: 'Главная', path: '/', icon: <DashboardIcon /> },
   { label: 'Ученики', path: '/students', icon: <SchoolIcon /> },
   { label: 'Педагоги', path: '/teachers', icon: <PersonIcon /> },
@@ -38,6 +41,10 @@ const NAV_ITEMS = [
   { label: 'Групповые занятия', path: '/groups', icon: <GroupsIcon /> },
   { label: 'Расписание', path: '/schedule', icon: <CalendarMonthIcon /> },
   { label: 'Финансы', path: '/finance', icon: <AccountBalanceIcon /> },
+]
+
+const DEV_NAV_ITEMS = [
+  { label: 'Для разработчика', path: '/developer', icon: <DeveloperModeIcon /> },
 ]
 
 export default function App() {
@@ -67,7 +74,20 @@ export default function App() {
       >
         <Toolbar />
         <List>
-          {NAV_ITEMS.map((item) => (
+          {MAIN_NAV_ITEMS.map((item) => (
+            <ListItemButton
+              key={item.path}
+              selected={location.pathname === item.path}
+              onClick={() => navigate(item.path)}
+            >
+              <ListItemIcon>{item.icon}</ListItemIcon>
+              <ListItemText primary={item.label} />
+            </ListItemButton>
+          ))}
+        </List>
+        <Divider />
+        <List>
+          {DEV_NAV_ITEMS.map((item) => (
             <ListItemButton
               key={item.path}
               selected={location.pathname === item.path}
@@ -91,6 +111,7 @@ export default function App() {
           <Route path="/groups" element={<GroupLessons />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/finance" element={<Finance />} />
+          <Route path="/developer" element={<Developer />} />
         </Routes>
       </Box>
     </Box>

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api import (
     availabilities,
+    dev,
     export,
     finance,
     group_lessons,
@@ -53,3 +54,4 @@ api_router.include_router(
 )
 api_router.include_router(export.router, prefix="/export", tags=["export"])
 api_router.include_router(seed.router, prefix="/seed", tags=["seed"])
+api_router.include_router(dev.router, prefix="/dev", tags=["developer"])

@@ -9,7 +9,7 @@ router = APIRouter()
 
 @router.post("", response_model=MessageResponse)
 def seed_data(db: Session = Depends(get_db)):
-    from app.services.seed_service import load_seed_data
+    from app.db.seed import seed_database
 
-    load_seed_data(db)
+    seed_database(db)
     return MessageResponse(message="Seed data loaded successfully")

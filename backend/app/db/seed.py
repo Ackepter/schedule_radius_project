@@ -30,31 +30,9 @@ def _merge_avail(a: list[tuple[int, time, time]]) -> list[tuple[int, time, time]
 
 def seed_database(db: Session) -> dict:
     """Заполняет базу демонстрационными данными."""
-    from sqlalchemy import text
+    from app.services.backup_service import wipe_all_data
 
-    dialect = db.bind.dialect.name
-    if dialect == "postgresql":
-        db.execute(
-            text(
-                "TRUNCATE TABLE scheduled_lessons, schedules, lesson_requests, "
-                "availabilities, prices, group_lesson_participants, group_lessons, "
-                "students, teachers, rooms, subjects, parents RESTART IDENTITY CASCADE"
-            )
-        )
-        db.flush()
-    else:
-        db.query(ScheduledLesson).delete()
-        db.query(Schedule).delete()
-        db.query(GroupLesson).delete()
-        db.query(LessonRequest).delete()
-        db.query(Availability).delete()
-        db.query(Price).delete()
-        db.query(Student).delete()
-        db.query(Teacher).delete()
-        db.query(Room).delete()
-        db.query(Subject).delete()
-        db.query(Parent).delete()
-        db.flush()
+    wipe_all_data(db)
 
     # Направления
     subjects = {
