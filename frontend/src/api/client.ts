@@ -7,8 +7,12 @@ const client = axios.create({
 
 client.interceptors.response.use(
   (res) => {
-    if (res.data && typeof res.data === 'object' && 'data' in res.data) {
-      res.data = res.data.data
+    if (res.data && typeof res.data === 'object' && !(res.data instanceof Blob)) {
+      if ('data' in res.data) {
+        res.data = (res.data as { data: unknown }).data
+      } else if ('items' in res.data) {
+        res.data = (res.data as { items: unknown }).items
+      }
     }
     return res
   },
