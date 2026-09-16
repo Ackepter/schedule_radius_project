@@ -5,7 +5,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
-from app.models.entities import Student
+from app.models.entities import LessonRequest, Student
 from app.schemas.schemas import (
     DataResponse,
     IdResponse,
@@ -63,7 +63,7 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
         select(Student)
         .options(
             selectinload(Student.parent),
-            selectinload(Student.lesson_requests).selectinload("subject"),
+            selectinload(Student.lesson_requests).selectinload(LessonRequest.subject),
         )
         .where(Student.id == student_id)
     )
