@@ -64,16 +64,6 @@ def update_availability(
     return DataResponse(data=AvailabilityBase.model_validate(obj))
 
 
-@router.delete("/{avail_id}", response_model=MessageResponse)
-def delete_availability(avail_id: int, db: Session = Depends(get_db)):
-    obj = db.get(Availability, avail_id)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Availability not found")
-    db.delete(obj)
-    db.commit()
-    return MessageResponse(message="Availability deleted")
-
-
 @router.delete("/bulk", response_model=MessageResponse)
 def bulk_delete_availabilities(
     entity_type: EntityTypeEnum = Query(...),
@@ -92,3 +82,13 @@ def bulk_delete_availabilities(
         db.delete(row)
     db.commit()
     return MessageResponse(message=f"Deleted {count} availabilities")
+
+
+@router.delete("/{avail_id}", response_model=MessageResponse)
+def delete_availability(avail_id: int, db: Session = Depends(get_db)):
+    obj = db.get(Availability, avail_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Availability not found")
+    db.delete(obj)
+    db.commit()
+    return MessageResponse(message="Availability deleted")

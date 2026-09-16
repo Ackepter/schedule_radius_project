@@ -113,8 +113,9 @@ export default function Teachers() {
       await api.delete(`/teachers/${id}`)
       setSnackbar({ open: true, msg: 'Удалено', severity: 'success' })
       load()
-    } catch {
-      setSnackbar({ open: true, msg: 'Ошибка удаления', severity: 'error' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -170,8 +171,9 @@ export default function Teachers() {
     try {
       await api.delete(`/availabilities/${availId}`)
       setAvailabilities((prev) => prev.filter((a) => a.id !== availId))
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -181,8 +183,10 @@ export default function Teachers() {
     try {
       await api.delete(`/availabilities/bulk?entity_type=teacher&entity_id=${availTeacherId}`)
       setAvailabilities([])
-    } catch {
-      // ignore
+      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 

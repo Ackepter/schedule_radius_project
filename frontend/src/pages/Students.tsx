@@ -31,8 +31,9 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
+import CloseIcon from '@mui/icons-material/Close'
 import api from '../api/client'
-import type { StudentBase, StudentList, Parent, Subject, Teacher } from '../api/types'
+import type { StudentBase, StudentList, Parent, Subject, Teacher, Availability as AvailType } from '../api/types'
 import { LessonTypeEnum, DayNames } from '../api/types'
 import type { LessonRequestBase } from '../api/types'
 
@@ -96,7 +97,7 @@ export default function Students() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detail, setDetail] = useState<StudentList | null>(null)
   const [detailTab, setDetailTab] = useState(0)
-  const [availabilities, setAvailabilities] = useState<Record<string, string>>({})
+  const [availabilities, setAvailabilities] = useState<AvailType[]>([])
   const [newAvailDay, setNewAvailDay] = useState(0)
   const [newAvailStart, setNewAvailStart] = useState('09:00')
   const [newAvailEnd, setNewAvailEnd] = useState('12:00')
@@ -194,12 +195,7 @@ export default function Students() {
   const loadAvailabilities = async (studentId: number) => {
     try {
       const res = await api.get(`/availabilities?entity_type=student&entity_id=${studentId}`)
-      const map: Record<string, string> = {}
-      for (const a of res.data as Array<{ day_of_week: number; start_time: string; end_time: string }>) {
-        const key = `${a.day_of_week}`
-        map[key] = `${a.start_time}–${a.end_time}`
-      }
-      setAvailabilities(map)
+      setAvailabilities(res.data as AvailType[])
     } catch {
       // ignore
     }
@@ -222,15 +218,29 @@ export default function Students() {
     }
   }
 
+  const deleteAvailability = async (availId: number | null | undefined) => {
+    if (availId == null) return
+    if (!confirm('Удалить эту доступность?')) return
+    try {
+      await api.delete(`/availabilities/${availId}`)
+      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
+      setAvailabilities((prev) => prev.filter((a) => a.id !== availId))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
+    }
+  }
+
   const deleteAllAvailability = async () => {
     if (!detail) return
     if (!confirm('Удалить всю доступность?')) return
     try {
       await api.delete(`/availabilities/bulk?entity_type=student&entity_id=${detail.id}`)
       setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
-      setAvailabilities({})
-    } catch {
-      setSnackbar({ open: true, msg: 'Ошибка удаления', severity: 'error' })
+      loadAvailabilities(detail.id)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -492,12 +502,19 @@ export default function Students() {
           {detailTab === 1 && detail && (
             <Box>
               <Typography variant="subtitle2" gutterBottom>Доступные дни/время:</Typography>
-              {Object.keys(availabilities).length === 0 ? (
+              {availabilities.length === 0 ? (
                 <Typography color="text.secondary">Нет доступности</Typography>
               ) : (
-                Object.entries(availabilities).map(([day, time]) => (
-                  <Chip key={day} label={`${DayNames[Number(day)]}: ${time}`} sx={{ mr: 1, mb: 1 }} />
-                ))
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {availabilities.map((a) => (
+                    <Chip
+                      key={a.id}
+                      label={`${DayNames[a.day_of_week]}: ${a.start_time}–${a.end_time}`}
+                      onDelete={() => void deleteAvailability(a.id)}
+                      deleteIcon={<CloseIcon />}
+                    />
+                  ))}
+                </Box>
               )}
               <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                 <FormControl sx={{ minWidth: 120 }}>

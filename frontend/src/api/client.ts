@@ -16,7 +16,15 @@ client.interceptors.response.use(
     }
     return res
   },
-  (err) => Promise.reject(err),
+  (error) => {
+    const detail: unknown = error?.response?.data?.detail
+    if (typeof detail === 'string' && detail) {
+      error.message = detail
+    } else if (Array.isArray(detail) && detail.length) {
+      error.message = detail.map((d: { msg?: string }) => d?.msg ?? '').filter(Boolean).join('; ')
+    }
+    return Promise.reject(error)
+  },
 )
 
 export default client

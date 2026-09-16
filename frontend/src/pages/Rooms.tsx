@@ -101,8 +101,9 @@ export default function Rooms() {
       await api.delete(`/rooms/${id}`)
       setSnackbar({ open: true, msg: 'Удалено', severity: 'success' })
       load()
-    } catch {
-      setSnackbar({ open: true, msg: 'Ошибка удаления', severity: 'error' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -156,8 +157,9 @@ export default function Rooms() {
     try {
       await api.delete(`/availabilities/${availId}`)
       setAvailabilities((prev) => prev.filter((a) => a.id !== availId))
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -167,8 +169,10 @@ export default function Rooms() {
     try {
       await api.delete(`/availabilities/bulk?entity_type=room&entity_id=${availRoomId}`)
       setAvailabilities([])
-    } catch {
-      // ignore
+      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
+      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
