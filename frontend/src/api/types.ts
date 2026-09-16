@@ -217,6 +217,7 @@ export interface UnscheduledItem {
   identifier: string
   name?: string | null
   reason: string
+  suggestions?: string[]
 }
 
 export interface ConflictDetail {

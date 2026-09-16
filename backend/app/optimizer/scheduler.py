@@ -273,7 +273,10 @@ def build_and_solve(
     close_min = settings.late_hour * 60
     slots_in_day = (close_min - open_min) // 15
     if slots_in_day <= 0:
-        return ScheduleResult(success=False, message="Некорректные границы рабочего времени")
+        return ScheduleResult(
+            success=False,
+            message="Не удалось составить расписание: некорректные границы рабочего времени (начало >= конец). Настройте рабочие часы центра в настройках оптимизатора."
+        )
 
     teachers = _load_teachers(db)
     rooms = _load_rooms(db)
@@ -568,24 +571,34 @@ def build_and_solve(
 
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         result.success = False
-        result.message = f"Не удалось решить задачу: {solver.StatusName(status)}"
+        result.message = (
+            f"Не удалось составить расписание: {solver.StatusName(status)}. "
+            f"Проверьте доступность учеников, педагогов и кабинетов, "
+            f"а также рабочие часы центра."
+        )
         return result
 
     result.success = True
     for oi, od in enumerate(occs_data):
         occ = od["occ"]
         if oi not in PRESENT:
+            # Нет переменных — вообще нет валидных комбинаций (студенты/педагоги/кабинеты не пересекаются)
+            student_names = ", ".join(students[sid].name for sid in occ.student_ids if sid in students)
+            student_part = f" ({student_names})" if student_names else ""
             result.unscheduled.append(
                 UnscheduledInfo(
                     identifier=occ.id,
                     name=occ.title,
-                    reason="Невозможно разместить: нет подходящих интервалов, педагогов или кабинетов.",
+                    reason=(
+                        f"Нет ни одного слота, где свободны и ученик{student_part}, "
+                        f"и педагог, и кабинет одновременно."
+                    ),
                     suggestions=["Добавить педагога", "Добавить кабинет", "Расширить доступность детей"],
                 )
             )
             continue
         if not solver.Value(PRESENT[oi]):
-            diag = _diagnose(db, occ, od, slots_in_day)
+            diag = _diagnose(db, occ, od, slots_in_day, students)
             result.unscheduled.append(
                 UnscheduledInfo(
                     identifier=occ.id, name=occ.title,
@@ -624,33 +637,40 @@ def _diagnose(
     occ: LessonOccurrence,
     od: dict,
     slots_in_day: int,
+    students: dict[int, StudentAvail],
 ) -> dict:
     reasons: list[str] = []
     suggestions: list[str] = []
 
+    student_names = ", ".join(students[sid].name for sid in occ.student_ids if sid in students)
+    student_desc = f" (ученики: {student_names})" if student_names else ""
+
     if not od["teachers"]:
         if occ.preferred_teacher_id is not None and occ.teacher_is_required:
             reasons.append(
-                f"Обязательный педагог не ведёт направление «{occ.subject_name}» или недоступен."
+                f"У занятия «{occ.subject_name}»{student_desc} обязательный педагог не ведёт это направление или недоступен."
             )
+            suggestions.append("Назначить другого обязательного педагога или снять флаг «обязательный»")
         else:
-            reasons.append(f"Нет активных педагогов по направлению «{occ.subject_name}».")
-        suggestions.append("Добавить педагога")
+            reasons.append(f"По направлению «{occ.subject_name}»{student_desc} нет активных педагогов.")
+            suggestions.append("Добавить педагога на это направление")
 
     if not od["rooms"]:
         n = len(occ.student_ids) or 1
         reasons.append(
-            f"Нет кабинетов для направления «{occ.subject_name}» вместимостью не менее {n}."
+            f"Нет кабинета для направления «{occ.subject_name}»{student_desc} вместимостью не менее {n}."
         )
-        suggestions.append("Добавить кабинет")
+        suggestions.append("Добавить кабинет подходящей вместимости")
 
     if not od["positions"]:
         reasons.append(
-            "У участников занятия нет пересекающихся свободных интервалов нужной длительности."
+            f"У ученика(ов){student_desc} нет пересекающихся свободных интервалов длительностью {occ.duration_minutes} мин."
         )
         suggestions.append("Расширить доступность детей")
 
     free = busy = 0
+    t_only_busy = 0
+    r_only_busy = 0
     for (d, s) in od["positions"][:200]:
         has_t = any(t.fits(d, s, od["dur_slots"], slots_in_day) for t in od["teachers"])
         has_r = any(r.fits(d, s, od["dur_slots"], slots_in_day) for r in od["rooms"])
@@ -658,14 +678,27 @@ def _diagnose(
             free += 1
         else:
             busy += 1
+            if not has_t and has_r:
+                t_only_busy += 1
+            elif has_t and not has_r:
+                r_only_busy += 1
 
     if free > 0:
         reasons.append(
-            "Есть свободные слоты, но занятие не размещено — вероятен конфликт за ресурсы с другими занятиями."
+            "Есть свободные слоты, но занятие не размещено — вероятен конфликт за педагога или кабинет с другими занятиями."
         )
+        suggestions.append("Увеличить количество педагогов/кабинетов или сократить кол-во занятий")
 
     if free == 0 and busy > 0:
-        reasons.append("В доступное детям время педагоги или кабинеты заняты.")
+        parts = []
+        if t_only_busy:
+            parts.append(f"педагогов не хватает в {t_only_busy} из {len(od['positions'][:200])} проверенных слотов")
+        if r_only_busy:
+            parts.append(f"кабинетов не хватает в {r_only_busy} из {len(od['positions'][:200])} проверенных слотов")
+        if parts:
+            reasons.append("В доступное детям время " + ", ".join(parts) + ".")
+        else:
+            reasons.append("В доступное детям время педагоги и кабинеты заняты.")
         suggestions.append("Расширить рабочие часы педагогов")
         suggestions.append("Добавить кабинет")
 
@@ -680,7 +713,7 @@ def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -
     if not occurrences:
         return ScheduleResult(
             success=False,
-            message="Нет занятий для составления расписания. Добавьте требования учеников или групповые занятия.",
+            message="Нет занятий для составления расписания. Добавьте индивидуальные требования учеников (активные, с типом 'individual') или групповые занятия с участниками."
         )
 
     opt_settings = db.scalars(select(OptimizerSettings).limit(1)).first()
@@ -716,13 +749,13 @@ def _pairwise_conflicts(scheduled: list[dict]) -> str:
             if not (sta < enb and stb < ena):
                 continue
             if a["teacher_id"] == b["teacher_id"]:
-                return f"Педагог {a['teacher_id']} пересечён"
+                return f"Педагог ID {a['teacher_id']} имеет пересечение занятий"
             if a["room_id"] == b["room_id"]:
-                return f"Кабинет {a['room_id']} пересечён"
+                return f"Кабинет ID {a['room_id']} имеет пересечение занятий"
             a_students = set(a.get("students") or [])
             b_students = set(b.get("students") or [])
             if a_students & b_students:
-                return "Ученик пересечён"
+                return f"Ученик ID {next(iter(a_students & b_students))} имеет пересечение занятий"
     return ""
 
 

@@ -561,6 +561,7 @@ class UnscheduledLessonReport(SchemaBase):
     identifier: str
     name: Optional[str] = None
     reason: str
+    suggestions: list[str] = []
 
 
 class ScheduleGenerateResponse(SchemaBase):

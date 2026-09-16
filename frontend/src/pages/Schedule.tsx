@@ -45,7 +45,7 @@ import { DayNames, DayNamesFull } from '../api/types'
 const HOUR_START = 9
 const HOUR_END = 20
 const TOTAL_HOURS = HOUR_END - HOUR_START
-const SLOT_HEIGHT = 56
+const SLOT_HEIGHT = 70
 
 interface DragData {
   lessonId: number
@@ -102,7 +102,10 @@ export default function Schedule() {
 
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
   const [unscheduledReport, setUnscheduledReport] = useState('')
-  const [unscheduledItems, setUnscheduledItems] = useState<Array<{ identifier: string; name?: string; reason: string }>>([])
+  const [unscheduledItems, setUnscheduledItems] = useState<Array<{ identifier: string; name?: string; reason: string; suggestions?: string[] }>>([])
+
+  const [genErrorOpen, setGenErrorOpen] = useState(false)
+  const [genErrorMsg, setGenErrorMsg] = useState('')
 
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false, msg: '', severity: 'success',
@@ -158,7 +161,7 @@ export default function Schedule() {
         scheduled_count: number
         unscheduled_count: number
         unscheduled_report?: string | null
-        unscheduled?: Array<{ identifier: string; name?: string; reason: string }>
+        unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[] }>
       }
       setSnackbar({
         open: true,
@@ -174,7 +177,8 @@ export default function Schedule() {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Ошибка генерации'
-      setSnackbar({ open: true, msg, severity: 'error' })
+      setGenErrorMsg(msg)
+      setGenErrorOpen(true)
     }
     setGenerating(false)
   }
@@ -505,22 +509,22 @@ export default function Schedule() {
                         top: `${top}px`,
                         left: 2,
                         right: 2,
-                        height: `${Math.max(height, 40)}px`,
+                        minHeight: `${Math.max(height, 56)}px`,
+                        height: 'auto',
                         bgcolor: lesson.lesson_type === 'individual' ? '#e3f2fd' : '#f3e5f5',
                         borderLeft: lesson.lesson_type === 'individual' ? '4px solid #1565c0' : '4px solid #6a1b9a',
-                        overflow: 'hidden',
                         cursor: 'grab',
                         userSelect: 'none',
                         '&:hover': { boxShadow: 3 },
-                        p: 0.5,
-                        fontSize: 11,
+                        p: 1,
+                        fontSize: 12,
                       }}
                     >
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Typography variant="caption" sx={{ fontWeight: 'bold', lineHeight: 1.2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 'bold', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {lesson.start_time}–{lesson.end_time}
                         </Typography>
-                        <Box>
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
                           <IconButton
                             size="small"
                             onClick={(e) => { e.stopPropagation(); openDetailDialog(lesson) }}
@@ -545,22 +549,22 @@ export default function Schedule() {
                           </IconButton>
                         </Box>
                       </Box>
-                      <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', lineHeight: 1.2 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {subject}
                       </Typography>
-                      <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.2, color: 'text.secondary' }}>
+                      <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.3, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {lesson.lesson_type === 'individual' ? 'Индивид.' : 'Групп.'} · {getTeacherName(lesson.teacher_id)}
                       </Typography>
-                      <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.2, color: 'text.secondary' }}>
+                      <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.3, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {getRoomName(lesson.room_id)}
                       </Typography>
                       {lesson.student && (
-                        <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.2 }}>
+                        <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {getStudentName(lesson.student_id)}
                         </Typography>
                       )}
-                      {lesson.group_lesson && height > 70 && (
-                        <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.2, fontSize: 10, color: 'text.secondary' }}>
+                      {lesson.group_lesson && height > 80 && (
+                        <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.3, fontSize: 11, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {getParticipantsNames(lesson)}
                         </Typography>
                       )}
@@ -711,21 +715,47 @@ export default function Schedule() {
       <Dialog open={unscheduledOpen} onClose={() => setUnscheduledOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Неразмещённые занятия</DialogTitle>
         <DialogContent>
-          {unscheduledReport && (
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', mb: 2 }}>
-              {unscheduledReport}
-            </Typography>
-          )}
           {unscheduledItems.map((item, i) => (
-            <Paper key={i} sx={{ p: 1.5, mb: 1, borderLeft: '4px solid #f44336' }}>
-              <Typography variant="subtitle2">{item.identifier}</Typography>
-              {item.name && <Typography variant="body2">{item.name}</Typography>}
-              <Typography variant="body2" color="text.secondary">{item.reason}</Typography>
+            <Paper key={i} sx={{ p: 2, mb: 1.5, borderLeft: '4px solid #f44336' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                    {item.identifier}
+                  </Typography>
+                  {item.name && (
+                    <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                      {item.name}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+              <Typography variant="body2" sx={{ mb: 1.5, lineHeight: 1.5 }}>
+                {item.reason}
+              </Typography>
+              {item.suggestions && item.suggestions.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                  {item.suggestions.map((s, si) => (
+                    <Chip key={si} label={s} size="small" variant="outlined" color="primary" />
+                  ))}
+                </Box>
+              )}
             </Paper>
           ))}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setUnscheduledOpen(false)}>Закрыть</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={genErrorOpen} onClose={() => setGenErrorOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ color: 'error.main' }}>Не удалось составить расписание</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+            {genErrorMsg}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGenErrorOpen(false)}>Закрыть</Button>
         </DialogActions>
       </Dialog>
 
