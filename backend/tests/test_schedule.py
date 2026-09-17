@@ -550,9 +550,11 @@ def test_teacher_rate_override_precedence(fresh_db):
     db.add(TeacherRate(teacher_id=t1.id, subject_id=s.id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=600))
     db.commit()
 
-    assert get_teacher_rate(db, t1.id, s.id, LessonTypeEnum.individual) == 600
-    assert get_teacher_rate(db, t2.id, s.id, LessonTypeEnum.individual) == 400
-    assert get_teacher_rate(db, t2.id, s.id, LessonTypeEnum.group) == 0.0
+    r1 = get_teacher_rate(db, t1.id, s.id, LessonTypeEnum.individual)
+    assert r1 is not None and r1.rate_per_lesson == 600
+    r2 = get_teacher_rate(db, t2.id, s.id, LessonTypeEnum.individual)
+    assert r2 is not None and r2.rate_per_lesson == 400
+    assert get_teacher_rate(db, t2.id, s.id, LessonTypeEnum.group) is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -579,3 +581,142 @@ def test_teacher_rate_overpay_rejected(fresh_db):
     s2 = _subject(db, name="Новое направление")
     err = validate_teacher_rate(db, 100, s2.id, LessonTypeEnum.individual)
     assert err is not None and "Сначала укажите" in err
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 18 — процентная ставка педагога (процент от выручки занятия)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_teacher_rate_percent(fresh_db):
+    from app.models.entities import RateTypeEnum
+    from app.services.pricing_service import lesson_teacher_pay
+
+    db = fresh_db
+    s = _subject(db)
+    _price(db, s, LessonTypeEnum.individual, 1, 1, 1000)
+    _price(db, s, LessonTypeEnum.group, 2, 2, 700)
+
+    # процент <= 100 разрешён, 0 и >100 отклоняются
+    assert validate_teacher_rate(
+        db, 100, s.id, LessonTypeEnum.group, RateTypeEnum.percent
+    ) is None
+    err = validate_teacher_rate(db, 0, s.id, LessonTypeEnum.group, RateTypeEnum.percent)
+    assert err is not None and "больше 0" in err
+    err = validate_teacher_rate(
+        db, 100.5, s.id, LessonTypeEnum.group, RateTypeEnum.percent
+    )
+    assert err is not None and "превыша" in err
+
+    # расчёт: 50% от выручки занятия 1400 (2×700) = 700
+    rate = TeacherRate(
+        teacher_id=None, subject_id=s.id, lesson_type=LessonTypeEnum.group,
+        rate_type=RateTypeEnum.percent, rate_per_lesson=50,
+    )
+    db.add(rate)
+    db.commit()
+    assert lesson_teacher_pay(rate, 1400.0) == 700.0
+    assert lesson_teacher_pay(rate, 997.13) == round(997.13 * 0.5, 2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 19 — ставка «индивидуальное и групповое» (оба типа сразу)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_teacher_rate_both(fresh_db):
+    db = fresh_db
+    s = _subject(db)
+    t1 = _teacher(db, [s], name="Пед1")
+    _price(db, s, LessonTypeEnum.individual, 1, 1, 1000)
+    _price(db, s, LessonTypeEnum.group, 2, 2, 700)
+
+    # валидация: нужны цены обоих типов; лимит — самый дешёвый вариант (индивидуальная 1000)
+    assert validate_teacher_rate(db, 700, s.id, LessonTypeEnum.both) is None
+    assert validate_teacher_rate(db, 1000, s.id, LessonTypeEnum.both) is None
+    err = validate_teacher_rate(db, 1001, s.id, LessonTypeEnum.both)
+    assert err is not None and "превышает" in err
+
+    s2 = _subject(db, name="Без группы")
+    _price(db, s2, LessonTypeEnum.individual, 1, 1, 1000)
+    err = validate_teacher_rate(db, 100, s2.id, LessonTypeEnum.both)
+    assert err is not None and "обоих" in err
+
+    # приоритет: индивидуальная ставка педагога > «оба» > умолчание > ...
+    db.add(TeacherRate(teacher_id=None, subject_id=s.id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400))
+    db.add(TeacherRate(teacher_id=None, subject_id=s.id, lesson_type=LessonTypeEnum.both, rate_per_lesson=250))
+    db.add(TeacherRate(teacher_id=t1.id, subject_id=s.id, lesson_type=LessonTypeEnum.both, rate_per_lesson=500))
+    db.commit()
+
+    # у Пед1 индивидуальное занятие — его «оба»-ставка (500) переопределяет умолчание
+    r = get_teacher_rate(db, t1.id, s.id, LessonTypeEnum.individual)
+    assert r is not None and r.rate_per_lesson == 500
+    # у других индивидуальное — умолчание на точный тип (400) сильнее «оба»-умолчания
+    r = get_teacher_rate(db, 9999, s.id, LessonTypeEnum.individual)
+    assert r is not None and r.rate_per_lesson == 400
+    # групповое занятие: точной групповой ставки нет → «оба»-ставка (500)
+    r = get_teacher_rate(db, t1.id, s.id, LessonTypeEnum.group)
+    assert r is not None and r.rate_per_lesson == 500
+    r = get_teacher_rate(db, 9999, s.id, LessonTypeEnum.group)
+    assert r is not None and r.rate_per_lesson == 250
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 20 — финансы за день: фильтр по дню недели и разбивка по дням
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_finance_day_filter(fresh_db):
+    db = fresh_db
+    s = _subject(db)
+    t = _teacher(db, [s])
+    r = _room(db, 10, [s])
+    st1 = _student(db, ALL_DAYS, name="Перв")
+    st2 = _student(db, ALL_DAYS, name="Втор")
+    _price(db, s, LessonTypeEnum.individual, 1, 1, 1000)
+    db.add(TeacherRate(teacher_id=None, subject_id=s.id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400))
+    _request(db, st1, s, lesson_type=LessonTypeEnum.individual)
+    _request(db, st2, s, lesson_type=LessonTypeEnum.individual)
+    db.commit()
+
+    sched_id = generate_schedule(db, "Неделя", date.today()).schedule_id
+    assert sched_id is not None
+
+    week = calculate_schedule_revenue(db, sched_id)
+    assert week.total_lessons == 2
+    assert week.day_of_week is None
+    assert len(week.days) == 7
+    assert sum(d.total_lessons for d in week.days) == 2
+    assert sum(d.total_revenue for d in week.days) == week.total_revenue
+
+    used_days = [d.day_of_week for d in week.days if d.total_lessons > 0]
+    assert len(used_days) >= 1
+
+    day = calculate_schedule_revenue(db, sched_id, day_of_week=used_days[0])
+    assert day.total_lessons >= 1
+    assert day.day_of_week == used_days[0]
+    assert day.net_revenue == round(day.total_revenue - day.teacher_pay_total, 2)
+
+    empty_day = calculate_schedule_revenue(db, sched_id, day_of_week=(used_days[0] + 1) % 7)
+    if all(d.total_lessons == 0 for d in [empty_day]):
+        assert empty_day.total_revenue == 0.0
+        assert empty_day.total_lessons == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 21 — регрессия: предупреждения не роняют сводку (UnboundLocalError)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_finance_missing_rate_warning(fresh_db):
+    db = fresh_db
+    s = _subject(db, name="Без ставки")
+    t = _teacher(db, [s])
+    r = _room(db, 10, [s])
+    st = _student(db, ALL_DAYS)
+    _price(db, s, LessonTypeEnum.individual, 1, 1, 1000)
+    _request(db, st, s, lesson_type=LessonTypeEnum.individual)
+    db.commit()
+
+    sched_id = generate_schedule(db, "Неделя", date.today()).schedule_id
+    assert sched_id is not None
+
+    f = calculate_schedule_revenue(db, sched_id)
+    assert f.total_lessons >= 1
+    assert any("не задана ставка" in w for w in f.warnings)

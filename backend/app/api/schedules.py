@@ -75,7 +75,14 @@ def _participant_subject_id(obj: ScheduledLesson) -> Optional[int]:
 
 @router.post("/generate", response_model=DataResponse[ScheduleGenerateResponse])
 def generate(db: Session = Depends(get_db)):
-    """Автоматически составить расписание на текущую неделю."""
+    """Автоматически составить расписание на текущую неделю.
+
+    Повторное формирование заменяет все прежние расписания, чтобы недели
+    не накапливались в списке.
+    """
+    for s in db.execute(select(Schedule)).scalars().all():
+        db.delete(s)
+    db.commit()
     try:
         result = generate_schedule(
             db,

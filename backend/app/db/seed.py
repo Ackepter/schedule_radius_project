@@ -12,6 +12,7 @@ from app.models.entities import (
     OptimizerSettings,
     Parent,
     Price,
+    RateTypeEnum,
     Room,
     Schedule,
     ScheduledLesson,
@@ -159,11 +160,12 @@ def seed_database(db: Session) -> dict:
         TeacherRate(teacher_id=None, subject_id=subjects["rus"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400),
         TeacherRate(teacher_id=None, subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=600),
         TeacherRate(teacher_id=None, subject_id=subjects["prog"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=550),
-        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400),
+        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.both, rate_per_lesson=400),
         TeacherRate(teacher_id=None, subject_id=subjects["math"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1200),
         TeacherRate(teacher_id=None, subject_id=subjects["eng"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1000),
         TeacherRate(teacher_id=None, subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1400),
-        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=800),
+        # Процентная ставка: 40% от выручки занятия (напр. групповое рисование)
+        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.group, rate_type=RateTypeEnum.percent, rate_per_lesson=40),
         # Индивидуальные ставки отдельных педагогов
         TeacherRate(teacher_id=teachers[0].id, subject_id=subjects["math"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=600),
         TeacherRate(teacher_id=teachers[4].id, subject_id=subjects["prog"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=700),

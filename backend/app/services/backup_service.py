@@ -18,6 +18,7 @@ from app.models.entities import (
     OptimizerSettings,
     Parent,
     Price,
+    RateTypeEnum,
     Room,
     Schedule,
     ScheduledLesson,
@@ -86,6 +87,15 @@ def _parse_lesson_type(value) -> LessonTypeEnum:
         return LessonTypeEnum(str(value).strip().lower())
     except ValueError:
         return LessonTypeEnum.individual
+
+
+def _parse_rate_type(value) -> RateTypeEnum:
+    if isinstance(value, RateTypeEnum):
+        return value
+    try:
+        return RateTypeEnum(str(value).strip().lower())
+    except ValueError:
+        return RateTypeEnum.fixed
 
 
 def _parse_status(value) -> str:
@@ -330,6 +340,7 @@ def export_all(db: Session) -> dict:
                 ),
                 "subject": subject_names.get(r.subject_id),
                 "lesson_type": _fmt_lesson_type(r.lesson_type),
+                "rate_type": r.rate_type.value if r.rate_type is not None else "fixed",
                 "rate_per_lesson": r.rate_per_lesson,
             }
             for r in teacher_rates
@@ -602,6 +613,7 @@ def import_all(db: Session, payload: dict) -> dict:
                 teacher_id=teacher_obj.id if teacher_obj else None,
                 subject_id=subj.id,
                 lesson_type=_parse_lesson_type(rr.get("lesson_type")),
+                rate_type=_parse_rate_type(rr.get("rate_type")),
                 rate_per_lesson=float(rr.get("rate_per_lesson") or 0),
             )
         )

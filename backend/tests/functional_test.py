@@ -185,6 +185,18 @@ def test_manual_edit_conflict():
     assert r2.status_code == 409, "expected 409 conflict"
 
 
+def test_generate_replaces():
+    """Повторное формирование должно заменять расписания, а не копить дубликаты."""
+    r = client.post("/api/schedules/generate")
+    assert r.status_code == 200, f"{r.status_code}: {r.text[:300]}"
+    fresh_id = r.json()["data"]["schedule_id"]
+
+    lst = client.get("/api/schedules").json()["items"]
+    assert len(lst) == 1, f"expected 1 schedule after re-generate, got {len(lst)}"
+    assert lst[0]["id"] == fresh_id
+    print(f"generate-replaces OK schedule_id={fresh_id}")
+
+
 if __name__ == "__main__":
     setup_db()
     test_seed_and_list()
@@ -193,4 +205,5 @@ if __name__ == "__main__":
     test_pricing_and_finance(sched_id)
     test_export(sched_id)
     test_manual_edit_conflict()
+    test_generate_replaces()
     print("ALL BACKEND TESTS PASSED")

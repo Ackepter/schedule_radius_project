@@ -26,6 +26,7 @@ def _to_base(r: TeacherRate) -> TeacherRateList:
         teacher_id=r.teacher_id,
         subject_id=r.subject_id,
         lesson_type=r.lesson_type,
+        rate_type=r.rate_type,
         rate_per_lesson=r.rate_per_lesson,
         is_default=r.is_default,
         teacher=r.teacher,
@@ -35,7 +36,11 @@ def _to_base(r: TeacherRate) -> TeacherRateList:
 
 def _check_rate(body, db: Session) -> None:
     error = validate_teacher_rate(
-        db, body.rate_per_lesson, body.subject_id, body.lesson_type
+        db,
+        body.rate_per_lesson,
+        body.subject_id,
+        body.lesson_type,
+        body.rate_type,
     )
     if error:
         raise HTTPException(status_code=400, detail=error)
@@ -96,12 +101,15 @@ def update_teacher_rate(
     if not obj:
         raise HTTPException(status_code=404, detail="Ставка не найдена")
     data = body.model_dump(exclude_unset=True)
-    if "rate_per_lesson" in data:
+    if any(f in data for f in ("rate_per_lesson", "rate_type")):
+        rate_value = data.get("rate_per_lesson", obj.rate_per_lesson)
+        rate_type = data.get("rate_type", obj.rate_type)
         error = validate_teacher_rate(
             db,
-            data["rate_per_lesson"],
+            rate_value,
             data.get("subject_id") or obj.subject_id,
             data.get("lesson_type") or obj.lesson_type,
+            rate_type,
         )
         if error:
             raise HTTPException(status_code=400, detail=error)

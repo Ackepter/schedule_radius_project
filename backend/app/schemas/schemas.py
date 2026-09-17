@@ -12,6 +12,7 @@ from pydantic import (
 from app.models.entities import (
     EntityTypeEnum,
     LessonTypeEnum,
+    RateTypeEnum,
     ScheduleStatusEnum,
 )
 
@@ -343,6 +344,7 @@ class TeacherRateBase(SchemaBase):
     teacher_id: Optional[int] = None
     subject_id: int
     lesson_type: LessonTypeEnum
+    rate_type: RateTypeEnum = RateTypeEnum.fixed
     rate_per_lesson: float = Field(ge=0.0)
     is_default: bool = False
     teacher: Optional[TeacherBase] = None
@@ -353,6 +355,7 @@ class TeacherRateCreate(SchemaBase):
     teacher_id: Optional[int] = Field(default=None, ge=1)
     subject_id: int = Field(..., ge=1)
     lesson_type: LessonTypeEnum
+    rate_type: RateTypeEnum = RateTypeEnum.fixed
     rate_per_lesson: float = Field(..., ge=0.0)
 
 
@@ -360,6 +363,7 @@ class TeacherRateUpdate(SchemaBase):
     teacher_id: Optional[int] = Field(default=None, ge=1)
     subject_id: Optional[int] = Field(default=None, ge=1)
     lesson_type: Optional[LessonTypeEnum] = None
+    rate_type: Optional[RateTypeEnum] = None
     rate_per_lesson: Optional[float] = Field(default=None, ge=0.0)
 
 
@@ -653,10 +657,22 @@ class FinanceStudentRow(SchemaBase):
     total_paid: float = 0.0
 
 
+class FinanceDayRow(SchemaBase):
+    """Финансы за один день недели (day_of_week: 0 = Пн, ..., 6 = Вс)."""
+    day_of_week: int
+    label: str
+    individual_lessons: int = 0
+    group_lessons: int = 0
+    total_lessons: int = 0
+    total_revenue: float = 0.0
+    teacher_pay_total: float = 0.0
+
+
 class FinanceSummary(SchemaBase):
     schedule_id: Optional[int] = None
     period_start: date
     period_end: date
+    day_of_week: Optional[int] = None
     total_revenue: float = 0.0
     teacher_pay_total: float = 0.0
     net_revenue: float = 0.0
@@ -667,6 +683,7 @@ class FinanceSummary(SchemaBase):
     average_lesson_price: float = 0.0
     revenue_by_subject: dict[str, float] = {}
     revenue_by_lesson_type: dict[str, float] = {}
+    days: list[FinanceDayRow] = []
     teacher_breakdown: list[FinanceTeacherRow] = []
     student_breakdown: list[FinanceStudentRow] = []
     warnings: list[str] = []

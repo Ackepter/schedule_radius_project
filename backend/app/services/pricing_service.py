@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.entities import (
     LessonTypeEnum,
     Price,
+    RateTypeEnum,
     ScheduledLesson,
     Schedule,
     Student,
@@ -14,6 +15,7 @@ from app.models.entities import (
     TeacherRate,
 )
 from app.schemas.schemas import (
+    FinanceDayRow,
     FinanceStudentRow,
     FinanceSummary,
     FinanceTeacherRow,
@@ -69,21 +71,47 @@ def get_teacher_rate(
     teacher_id: int,
     subject_id: int,
     lesson_type: LessonTypeEnum,
-) -> float:
-    """Ставка педагога за одно занятие: индивидуальная, иначе умолчание, иначе 0."""
+) -> Optional[TeacherRate]:
+    """Ставка педагога за одно занятие.
+
+    Учитывает ставку как на точный тип занятия, так и на «индивидуальное и групповое».
+    Приоритет:
+      1) ставка педагога на точный тип занятия;
+      2) ставка педагога на оба типа;
+      3) ставка по умолчанию на точный тип;
+      4) ставка по умолчанию на оба типа.
+    """
     rows = db.execute(
         select(TeacherRate).where(
             TeacherRate.subject_id == subject_id,
-            TeacherRate.lesson_type == lesson_type,
+            TeacherRate.lesson_type.in_([lesson_type, LessonTypeEnum.both]),
         )
     ).scalars().all()
     for r in rows:
-        if r.teacher_id == teacher_id:
-            return r.rate_per_lesson
+        if r.teacher_id == teacher_id and r.lesson_type == lesson_type:
+            return r
     for r in rows:
-        if r.teacher_id is None:
-            return r.rate_per_lesson
-    return 0.0
+        if r.teacher_id == teacher_id and r.lesson_type == LessonTypeEnum.both:
+            return r
+    for r in rows:
+        if r.teacher_id is None and r.lesson_type == lesson_type:
+            return r
+    for r in rows:
+        if r.teacher_id is None and r.lesson_type == LessonTypeEnum.both:
+            return r
+    return None
+
+
+def lesson_teacher_pay(rate: Optional[TeacherRate], lesson_revenue: float) -> float:
+    """Оплата педагога за одно занятие.
+
+    fixed — фиксированная сумма; percent — процент от выручки центра с занятия.
+    """
+    if rate is None:
+        return 0.0
+    if rate.rate_type == RateTypeEnum.percent:
+        return round(lesson_revenue * rate.rate_per_lesson / 100.0, 2)
+    return rate.rate_per_lesson
 
 
 def validate_teacher_rate(
@@ -91,16 +119,34 @@ def validate_teacher_rate(
     rate: float,
     subject_id: int,
     lesson_type: LessonTypeEnum,
+    rate_type: RateTypeEnum = RateTypeEnum.fixed,
 ) -> Optional[str]:
-    """Возвращает текст ошибки, если ставка превышает выручку центра с занятия."""
+    """Возвращает текст ошибки, если ставка приведёт к переплате педагогу."""
     if lesson_type == LessonTypeEnum.both:
-        lesson_type = LessonTypeEnum.individual
-    allowed = min_lesson_revenue(db, subject_id, lesson_type)
-    if allowed <= 0:
-        return (
-            "Не задана цена занятия для учеников. "
-            "Сначала укажите стоимость занятия на вкладке «Тарифы учеников»."
-        )
+        ind_allowed = min_lesson_revenue(db, subject_id, LessonTypeEnum.individual)
+        grp_allowed = min_lesson_revenue(db, subject_id, LessonTypeEnum.group)
+        if ind_allowed <= 0 or grp_allowed <= 0:
+            return (
+                "Для ставки на «индивидуальное и групповое» сначала задайте стоимость "
+                "обоих типов занятий на вкладке «Тарифы учеников»."
+            )
+        allowed = min(ind_allowed, grp_allowed)
+    else:
+        allowed = min_lesson_revenue(db, subject_id, lesson_type)
+        if allowed <= 0:
+            return (
+                "Не задана цена занятия для учеников. "
+                "Сначала укажите стоимость занятия на вкладке «Тарифы учеников»."
+            )
+    if rate_type == RateTypeEnum.percent:
+        if rate <= 0:
+            return "Процент оплаты педагога должен быть больше 0."
+        if rate > 100:
+            return (
+                f"Процент ({rate:g}%) не может превышать 100 — иначе оплата педагога "
+                "превысит выручку центра с занятия."
+            )
+        return None
     if rate > allowed:
         return (
             f"Ставка педагога ({rate:g} ₽) превышает выручку центра с занятия "
@@ -122,8 +168,21 @@ def _lesson_duration_hours(sl: ScheduledLesson) -> float:
     )
 
 
+WEEKDAY_LABELS = [
+    "Понедельник",
+    "Вторник",
+    "Среда",
+    "Четверг",
+    "Пятница",
+    "Суббота",
+    "Воскресенье",
+]
+
+
 def calculate_schedule_revenue(
-    db: Session, schedule_id: int
+    db: Session,
+    schedule_id: int,
+    day_of_week: Optional[int] = None,
 ) -> FinanceSummary:
     schedule = db.get(Schedule, schedule_id)
     if not schedule:
@@ -148,18 +207,8 @@ def calculate_schedule_revenue(
     for s in db.execute(select(Subject)).scalars():
         subject_names[s.id] = s.name
 
-    total_revenue = 0.0
-    teacher_pay_total = 0.0
-    individual_count = 0
-    group_count = 0
-    total_student_hours = 0.0
-    revenue_by_subject: dict[str, float] = {}
-    revenue_by_type: dict[str, float] = {}
     warnings: list[str] = []
-
-    teacher_pay_by_id: dict[int, dict] = {}
-    student_paid_by_id: dict[int, dict] = {}
-
+    entries: list[dict] = []
     for sl in lessons:
         duration_hours = _lesson_duration_hours(sl)
         subject_id = sl.lesson_request.subject_id if sl.lesson_request else None
@@ -176,58 +225,25 @@ def calculate_schedule_revenue(
                 f"{50:g} ₽ × {participant_count} чел."
             )
 
-        teacher_rate = 0.0
+        rate = None
         if sl.teacher_id is not None and subject_id is not None:
-            teacher_rate = get_teacher_rate(
+            rate = get_teacher_rate(
                 db, sl.teacher_id, subject_id, sl.lesson_type
             )
-            if teacher_rate == 0.0:
+            if rate is None:
                 warnings.append(
                     f"«{subject_name}»: для педагога "
                     f"{sl.teacher.full_name if sl.teacher else '—'} не задана ставка, "
                     "оплата 0 ₽."
                 )
-            elif teacher_rate > lesson_revenue:
-                warnings.append(
-                    f"«{subject_name}»: оплата педагога "
-                    f"{sl.teacher.full_name if sl.teacher else '—'} "
-                    f"({teacher_rate:g} ₽) превышает выручку центра с занятия "
-                    f"({lesson_revenue:g} ₽). Проверьте ставки."
-                )
-
-        total_revenue += lesson_revenue
-        teacher_pay_total += teacher_rate
-        total_student_hours += duration_hours * participant_count
-
-        if sl.lesson_type == LessonTypeEnum.individual:
-            individual_count += 1
-        else:
-            group_count += 1
-
-        revenue_by_subject[subject_name] = (
-            revenue_by_subject.get(subject_name, 0.0) + lesson_revenue
-        )
-        lesson_type_key = sl.lesson_type.value
-        revenue_by_type[lesson_type_key] = (
-            revenue_by_type.get(lesson_type_key, 0.0) + lesson_revenue
-        )
-
-        if sl.teacher_id is not None:
-            rec = teacher_pay_by_id.setdefault(
-                sl.teacher_id,
-                {
-                    "teacher_id": sl.teacher_id,
-                    "teacher_name": sl.teacher.full_name if sl.teacher else "—",
-                    "individual_lessons": 0,
-                    "group_lessons": 0,
-                    "total_pay": 0.0,
-                },
+        teacher_rate = lesson_teacher_pay(rate, lesson_revenue)
+        if rate is not None and teacher_rate > lesson_revenue:
+            warnings.append(
+                f"«{subject_name}»: оплата педагога "
+                f"{sl.teacher.full_name if sl.teacher else '—'} "
+                f"({teacher_rate:g} ₽) превышает выручку центра с занятия "
+                f"({lesson_revenue:g} ₽). Проверьте ставки."
             )
-            if sl.lesson_type == LessonTypeEnum.individual:
-                rec["individual_lessons"] += 1
-            else:
-                rec["group_lessons"] += 1
-            rec["total_pay"] += teacher_rate
 
         per_student_payment = 0.0
         if sl.lesson_type == LessonTypeEnum.individual:
@@ -253,7 +269,98 @@ def calculate_schedule_revenue(
         elif sl.student_id is not None:
             student_ids = [sl.student_id]
 
-        for sid in student_ids:
+        entries.append(
+            {
+                "day": sl.day_of_week,
+                "subject_name": subject_name,
+                "lesson_revenue": lesson_revenue,
+                "teacher_rate": teacher_rate,
+                "duration_hours": duration_hours,
+                "participant_count": participant_count,
+                "lesson_type": sl.lesson_type,
+                "teacher": sl.teacher,
+                "teacher_id": sl.teacher_id,
+                "per_student_payment": per_student_payment,
+                "student_ids": student_ids,
+            }
+        )
+
+    day_agg: dict[int, dict] = {}
+    for e in entries:
+        d = e["day"]
+        bucket = day_agg.setdefault(
+            d,
+            {
+                "individual_lessons": 0,
+                "group_lessons": 0,
+                "total_revenue": 0.0,
+                "teacher_pay_total": 0.0,
+            },
+        )
+        bucket["total_revenue"] += e["lesson_revenue"]
+        bucket["teacher_pay_total"] += e["teacher_rate"]
+        if e["lesson_type"] == LessonTypeEnum.individual:
+            bucket["individual_lessons"] += 1
+        else:
+            bucket["group_lessons"] += 1
+
+    if day_of_week is None:
+        period_entries = entries
+    else:
+        period_entries = [e for e in entries if e["day"] == day_of_week]
+
+    total_revenue = 0.0
+    teacher_pay_total = 0.0
+    individual_count = 0
+    group_count = 0
+    total_student_hours = 0.0
+    revenue_by_subject: dict[str, float] = {}
+    revenue_by_type: dict[str, float] = {}
+
+    teacher_pay_by_id: dict[int, dict] = {}
+    student_paid_by_id: dict[int, dict] = {}
+
+    for e in period_entries:
+        sl_type = e["lesson_type"]
+        subject_name = e["subject_name"]
+        lesson_revenue = e["lesson_revenue"]
+        teacher_rate = e["teacher_rate"]
+
+        total_revenue += lesson_revenue
+        teacher_pay_total += teacher_rate
+        total_student_hours += e["duration_hours"] * e["participant_count"]
+
+        if sl_type == LessonTypeEnum.individual:
+            individual_count += 1
+        else:
+            group_count += 1
+
+        revenue_by_subject[subject_name] = (
+            revenue_by_subject.get(subject_name, 0.0) + lesson_revenue
+        )
+        lesson_type_key = sl_type.value
+        revenue_by_type[lesson_type_key] = (
+            revenue_by_type.get(lesson_type_key, 0.0) + lesson_revenue
+        )
+
+        if e["teacher_id"] is not None:
+            rec = teacher_pay_by_id.setdefault(
+                e["teacher_id"],
+                {
+                    "teacher_id": e["teacher_id"],
+                    "teacher_name": e["teacher"].full_name if e["teacher"] else "—",
+                    "individual_lessons": 0,
+                    "group_lessons": 0,
+                    "total_pay": 0.0,
+                },
+            )
+            if sl_type == LessonTypeEnum.individual:
+                rec["individual_lessons"] += 1
+            else:
+                rec["group_lessons"] += 1
+            rec["total_pay"] += teacher_rate
+
+        for sid in e["student_ids"]:
             rec = student_paid_by_id.setdefault(
                 sid,
                 {
@@ -264,8 +371,8 @@ def calculate_schedule_revenue(
                     "total_paid": 0.0,
                 },
             )
-            rec["total_paid"] += per_student_payment
-            if sl.lesson_type == LessonTypeEnum.individual:
+            rec["total_paid"] += e["per_student_payment"]
+            if sl_type == LessonTypeEnum.individual:
                 rec["individual_lessons"] += 1
             else:
                 rec["group_lessons"] += 1
@@ -281,6 +388,23 @@ def calculate_schedule_revenue(
             rec = student_paid_by_id.get(st.id)
             if rec is not None:
                 rec["student_name"] = st.full_name
+
+    days = []
+    for d in range(7):
+        b = day_agg.get(d, {})
+        ind = b.get("individual_lessons", 0)
+        grp = b.get("group_lessons", 0)
+        days.append(
+            FinanceDayRow(
+                day_of_week=d,
+                label=WEEKDAY_LABELS[d],
+                individual_lessons=ind,
+                group_lessons=grp,
+                total_lessons=ind + grp,
+                total_revenue=round(b.get("total_revenue", 0.0), 2),
+                teacher_pay_total=round(b.get("teacher_pay_total", 0.0), 2),
+            )
+        )
 
     teacher_breakdown = [
         FinanceTeacherRow(
@@ -309,6 +433,7 @@ def calculate_schedule_revenue(
         schedule_id=schedule_id,
         period_start=schedule.week_start,
         period_end=week_end,
+        day_of_week=day_of_week,
         total_revenue=round(total_revenue, 2),
         teacher_pay_total=round(teacher_pay_total, 2),
         total_lessons=total_lessons,
@@ -320,6 +445,7 @@ def calculate_schedule_revenue(
         ),
         revenue_by_subject=revenue_by_subject,
         revenue_by_lesson_type=revenue_by_type,
+        days=days,
         teacher_breakdown=teacher_breakdown,
         student_breakdown=student_breakdown,
         warnings=warnings,

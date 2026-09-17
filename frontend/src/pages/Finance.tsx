@@ -34,15 +34,23 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
+import CachedIcon from '@mui/icons-material/Cached'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import api from '../api/client'
+import {
+  DayNames,
+  DayNamesFull,
+} from '../api/types'
 import type {
   ScheduleBase,
   FinanceSummary,
+  FinanceDayRow,
+  ScheduleGenerateResponse,
   Subject,
   Teacher,
   Price,
   TeacherRate,
+  RateType,
 } from '../api/types'
 
 interface PriceForm {
@@ -57,6 +65,7 @@ interface RateForm {
   teacher_id: number | ''
   subject_id: number
   lesson_type: string
+  rate_type: RateType
   rate_per_lesson: number
 }
 
@@ -72,6 +81,7 @@ const emptyRateForm: RateForm = {
   teacher_id: '',
   subject_id: 0,
   lesson_type: 'individual',
+  rate_type: 'fixed',
   rate_per_lesson: 0,
 }
 
@@ -85,6 +95,9 @@ function errMsg(err: unknown): string {
 
 const fmt = (v: number) => `${Number(v).toLocaleString('ru-RU')} ₽`
 
+const fmtRate = (r: TeacherRate) =>
+  r.rate_type === 'percent' ? `${Number(r.rate_per_lesson)}%` : fmt(r.rate_per_lesson)
+
 export default function Finance() {
   const [tab, setTab] = useState(0)
   const [schedules, setSchedules] = useState<ScheduleBase[]>([])
@@ -94,6 +107,7 @@ export default function Finance() {
   const [rates, setRates] = useState<TeacherRate[]>([])
   const [selectedScheduleId, setSelectedScheduleId] = useState<number>(0)
   const [summary, setSummary] = useState<FinanceSummary | null>(null)
+  const [periodDay, setPeriodDay] = useState<number>(-1)
   const [loading, setLoading] = useState(false)
 
   const [priceOpen, setPriceOpen] = useState(false)
@@ -123,17 +137,38 @@ export default function Finance() {
     setRates(rt.data as TeacherRate[])
   }, [])
 
+  const [generating, setGenerating] = useState(false)
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await api.post('/schedules/generate')
+      const data = res.data as ScheduleGenerateResponse
+      await loadBase()
+      setSelectedScheduleId(data.schedule_id)
+      setSnackbar({
+        open: true,
+        msg: `Расписание сформировано: ${data.scheduled_count} занятий, ${data.unscheduled_count} не размещено`,
+        severity: 'success',
+      })
+    } catch (err) {
+      setSnackbar({ open: true, msg: errMsg(err), severity: 'error' })
+    }
+    setGenerating(false)
+  }
+
   useEffect(() => {
     loadBase().catch(() =>
       setSnackbar({ open: true, msg: 'Ошибка загрузки данных', severity: 'error' }),
     )
   }, [loadBase])
 
-  const loadSummary = useCallback(async (scheduleId: number) => {
+  const loadSummary = useCallback(async (scheduleId: number, day: number) => {
     if (!scheduleId) return
     setLoading(true)
     try {
-      const res = await api.get(`/finance/summary?schedule_id=${scheduleId}`)
+      const q = day >= 0 ? `&day_of_week=${day}` : ''
+      const res = await api.get(`/finance/summary?schedule_id=${scheduleId}${q}`)
       setSummary(res.data as FinanceSummary)
     } catch {
       setSnackbar({ open: true, msg: 'Ошибка загрузки финансов', severity: 'error' })
@@ -143,8 +178,8 @@ export default function Finance() {
   }, [])
 
   useEffect(() => {
-    if (selectedScheduleId) loadSummary(selectedScheduleId)
-  }, [selectedScheduleId, loadSummary])
+    if (selectedScheduleId) loadSummary(selectedScheduleId, periodDay)
+  }, [selectedScheduleId, periodDay, loadSummary])
 
   const subjectName = (id: number) => (subjects ?? []).find((s) => s.id === id)?.name ?? '—'
   const teacherName = (id: number) => {
@@ -152,7 +187,8 @@ export default function Finance() {
     return t ? `${t.last_name} ${t.first_name}` : '—'
   }
   const typeLabel = (t: string) =>
-    t === 'individual' ? 'Индивидуальное' : t === 'group' ? 'Групповое' : t
+    t === 'individual' ? 'Индивидуальное' : t === 'group' ? 'Групповое' : t === 'both' ? 'Индивидуальное и групповое' : t
+  const periodSuffix = periodDay >= 0 ? ` · ${DayNamesFull[periodDay]}` : ''
 
   // ── Тарифы учеников ─────────────────────────────────────────────────
   const openPriceDialog = (row?: Price) => {
@@ -218,6 +254,7 @@ export default function Finance() {
         teacher_id: row.teacher_id ?? '',
         subject_id: row.subject_id,
         lesson_type: row.lesson_type,
+        rate_type: row.rate_type === 'percent' ? 'percent' : 'fixed',
         rate_per_lesson: row.rate_per_lesson,
       })
     } else {
@@ -235,16 +272,19 @@ export default function Finance() {
       teacher_id: number | null
       subject_id: number
       lesson_type: string
+      rate_type: RateType
       rate_per_lesson: number
     } = {
       teacher_id: rateForm.teacher_id === '' ? null : Number(rateForm.teacher_id),
       subject_id: rateForm.subject_id,
       lesson_type: rateForm.lesson_type,
+      rate_type: rateForm.rate_type,
       rate_per_lesson: rateForm.rate_per_lesson,
     }
     try {
       if (rateEditId != null) {
         await api.put(`/finance/teacher-rates/${rateEditId}`, {
+          rate_type: body.rate_type,
           rate_per_lesson: body.rate_per_lesson,
         })
       } else {
@@ -289,18 +329,41 @@ export default function Finance() {
       {/* ───────────── Отчёт ───────────── */}
       {tab === 0 && (
         <Box>
-          <FormControl sx={{ minWidth: 300, mb: 3 }}>
-            <InputLabel>Расписание</InputLabel>
-            <Select
-              value={selectedScheduleId}
-              label="Расписание"
-              onChange={(e) => setSelectedScheduleId(Number(e.target.value))}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+            <FormControl sx={{ minWidth: 300 }}>
+              <InputLabel>Расписание</InputLabel>
+              <Select
+                value={selectedScheduleId}
+                label="Расписание"
+                onChange={(e) => setSelectedScheduleId(Number(e.target.value))}
+              >
+                {schedules.map((s) => (
+                  <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl sx={{ minWidth: 200 }}>
+              <InputLabel>Период</InputLabel>
+              <Select
+                value={periodDay}
+                label="Период"
+                onChange={(e) => setPeriodDay(Number(e.target.value))}
+              >
+                <MenuItem value={-1}>Вся неделя</MenuItem>
+                {DayNamesFull.map((label, i) => (
+                  <MenuItem key={i} value={i}>{label} ({DayNames[i]})</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button
+              variant="contained"
+              startIcon={generating ? <CircularProgress size={18} color="inherit" /> : <CachedIcon />}
+              onClick={handleGenerate}
+              disabled={generating}
             >
-              {schedules.map((s) => (
-                <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              Сформировать
+            </Button>
+          </Box>
 
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -314,7 +377,7 @@ export default function Finance() {
                     <Typography variant="h5" color="primary">
                       {fmt(summary.total_revenue)}
                     </Typography>
-                    <Typography color="text.secondary">Выручка центра (оплата детей)</Typography>
+                    <Typography color="text.secondary">Выручка центра (оплата детей){periodSuffix}</Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -324,7 +387,7 @@ export default function Finance() {
                     <Typography variant="h5" color="warning.main">
                       {fmt(summary.teacher_pay_total)}
                     </Typography>
-                    <Typography color="text.secondary">На оплату педагогам</Typography>
+                    <Typography color="text.secondary">На оплату педагогам{periodSuffix}</Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -334,7 +397,7 @@ export default function Finance() {
                     <Typography variant="h5" color="success.main">
                       {fmt(summary.net_revenue)}
                     </Typography>
-                    <Typography color="text.secondary">Чистая прибыль центра</Typography>
+                    <Typography color="text.secondary">Чистая прибыль центра{periodSuffix}</Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -343,10 +406,59 @@ export default function Finance() {
                   <CardContent>
                     <Typography variant="h3">{summary.total_lessons}</Typography>
                     <Typography color="text.secondary">
-                      Занятий ({summary.individual_lessons} индивид. / {summary.group_lessons} групп.)
+                      Занятий{periodSuffix} ({summary.individual_lessons} индивид. / {summary.group_lessons} групп.)
                     </Typography>
                   </CardContent>
                 </Card>
+              </Grid>
+
+              <Grid size={{ xs: 12 }}>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="h6" gutterBottom>Финансы по дням</Typography>
+                  {(summary.days ?? []).every((d) => d.total_lessons === 0) ? (
+                    <Typography color="text.secondary">В этом расписании нет занятий</Typography>
+                  ) : (
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>День</TableCell>
+                            <TableCell align="right">Индивид.</TableCell>
+                            <TableCell align="right">Групп.</TableCell>
+                            <TableCell align="right">Выручка</TableCell>
+                            <TableCell align="right">Оплата педагогам</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(summary.days ?? [])
+                            .filter((d) => d.total_lessons > 0)
+                            .map((d) => (
+                              <TableRow
+                                key={d.day_of_week}
+                                hover
+                                onClick={() => setPeriodDay(d.day_of_week)}
+                                sx={{
+                                  cursor: 'pointer',
+                                  bgcolor: periodDay === d.day_of_week ? 'action.selected' : 'inherit',
+                                }}
+                              >
+                                <TableCell sx={{ fontWeight: 'bold' }}>
+                                  {d.label}{' '}
+                                  <Typography component="span" variant="caption" color="text.secondary">
+                                    · {DayNames[d.day_of_week]}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell align="right">{d.individual_lessons}</TableCell>
+                                <TableCell align="right">{d.group_lessons}</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmt(d.total_revenue)}</TableCell>
+                                <TableCell align="right">{fmt(d.teacher_pay_total)}</TableCell>
+                              </TableRow>
+                            ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Paper>
               </Grid>
 
               {summary.warnings.length > 0 && (
@@ -530,9 +642,9 @@ export default function Finance() {
             </Button>
           </Box>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            Ставка — сумма, которую центр платит педагогу за одно занятие по направлению.
-            Ставка не может превышать выручку центра с занятия. «По умолчанию» применяется ко всем
-            педагогам, у которых нет индивидуальной ставки.
+            Ставка — оплата педагогу за одно занятие: фиксированная сумма (₽) или процент от выручки
+            центра с занятия. Оплата не может превышать выручку занятия. «По умолчанию» применяется
+            ко всем педагогам, у которых нет индивидуальной ставки.
           </Typography>
 
           <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>По умолчанию (все педагоги)</Typography>
@@ -542,7 +654,7 @@ export default function Finance() {
                 <TableRow>
                   <TableCell>Направление</TableCell>
                   <TableCell>Тип</TableCell>
-                  <TableCell align="right">Ставка за занятие</TableCell>
+                  <TableCell align="right">Ставка</TableCell>
                   <TableCell align="right">Действия</TableCell>
                 </TableRow>
               </TableHead>
@@ -551,7 +663,7 @@ export default function Finance() {
                   <TableRow key={r.id}>
                     <TableCell>{subjectName(r.subject_id)}</TableCell>
                     <TableCell><Chip size="small" label={typeLabel(r.lesson_type)} /></TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmt(r.rate_per_lesson)}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmtRate(r)}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                       <Tooltip title="Редактировать">
                         <IconButton size="small" onClick={() => openRateDialog(r)}><EditIcon fontSize="small" /></IconButton>
@@ -577,7 +689,7 @@ export default function Finance() {
                   <TableCell>Педагог</TableCell>
                   <TableCell>Направление</TableCell>
                   <TableCell>Тип</TableCell>
-                  <TableCell align="right">Ставка за занятие</TableCell>
+                  <TableCell align="right">Ставка</TableCell>
                   <TableCell align="right">Действия</TableCell>
                 </TableRow>
               </TableHead>
@@ -587,7 +699,7 @@ export default function Finance() {
                     <TableCell>{r.teacher_id != null ? teacherName(r.teacher_id) : '—'}</TableCell>
                     <TableCell>{subjectName(r.subject_id)}</TableCell>
                     <TableCell><Chip size="small" label={typeLabel(r.lesson_type)} /></TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmt(r.rate_per_lesson)}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmtRate(r)}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                       <Tooltip title="Редактировать">
                         <IconButton size="small" onClick={() => openRateDialog(r)}><EditIcon fontSize="small" /></IconButton>
@@ -707,10 +819,22 @@ export default function Finance() {
             >
               <MenuItem value="individual">Индивидуальное</MenuItem>
               <MenuItem value="group">Групповое</MenuItem>
+              <MenuItem value="both">Индивидуальное и групповое</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel>Тип ставки</InputLabel>
+            <Select
+              value={rateForm.rate_type}
+              label="Тип ставки"
+              onChange={(e) => setRateForm({ ...rateForm, rate_type: e.target.value as RateType })}
+            >
+              <MenuItem value="fixed">Фиксированная сумма за занятие</MenuItem>
+              <MenuItem value="percent">Процент от выручки занятия</MenuItem>
             </Select>
           </FormControl>
           <TextField
-            label="Ставка за занятие (₽)"
+            label={rateForm.rate_type === 'percent' ? 'Процент от выручки занятия (%)' : 'Ставка за занятие (₽)'}
             type="number"
             value={rateForm.rate_per_lesson}
             onChange={(e) => setRateForm({ ...rateForm, rate_per_lesson: Number(e.target.value) })}
@@ -718,7 +842,9 @@ export default function Finance() {
           />
           {rateForm.rate_per_lesson > 0 && (
             <Typography variant="caption" color="text.secondary">
-              Проверка: ставка не должна превышать выручку центра с занятия. При нарушении сохранение будет отклонено.
+              {rateForm.rate_type === 'percent'
+                ? 'Проверка: процент не должен превышать 100 — иначе оплата педагога окажется больше выручки центра с занятия.'
+                : 'Проверка: ставка не должна превышать выручку центра с занятия. При нарушении сохранение будет отклонено.'}
             </Typography>
           )}
         </DialogContent>

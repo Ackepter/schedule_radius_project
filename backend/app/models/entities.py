@@ -83,6 +83,12 @@ class LessonTypeEnum(str, enum.Enum):
     both = "both"
 
 
+class RateTypeEnum(str, enum.Enum):
+    """Тип ставки педагога: фиксированная сумма или процент от выручки занятия."""
+    fixed = "fixed"
+    percent = "percent"
+
+
 class ScheduleStatusEnum(str, enum.Enum):
     draft = "draft"
     active = "active"
@@ -301,6 +307,9 @@ class TeacherRate(Base):
 
     teacher_id = NULL — ставка по умолчанию для пары (subject, lesson_type).
     teacher_id задан — индивидуальная ставка конкретного педагога (переопределяет умолчание).
+
+    rate_type = fixed — rate_per_lesson это фиксированная сумма за занятие (руб.).
+    rate_type = percent — rate_per_lesson это процент от выручки центра с занятия.
     """
 
     __tablename__ = "teacher_rates"
@@ -313,6 +322,9 @@ class TeacherRate(Base):
         Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False
     )
     lesson_type = Column(Enum(LessonTypeEnum), nullable=False)
+    rate_type = Column(
+        Enum(RateTypeEnum), default=RateTypeEnum.fixed, nullable=False
+    )
     rate_per_lesson = Column(Float, nullable=False)
 
     teacher: Mapped[Optional["Teacher"]] = relationship("Teacher")

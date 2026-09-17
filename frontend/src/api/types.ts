@@ -5,6 +5,12 @@ export const LessonTypeEnum = {
 } as const
 export type LessonType = (typeof LessonTypeEnum)[keyof typeof LessonTypeEnum]
 
+export const RateTypeEnum = {
+  fixed: 'fixed',
+  percent: 'percent',
+} as const
+export type RateType = (typeof RateTypeEnum)[keyof typeof RateTypeEnum]
+
 export const ScheduleStatusEnum = {
   draft: 'draft',
   active: 'active',
@@ -145,6 +151,7 @@ export interface TeacherRate {
   teacher_id?: number | null
   subject_id: number
   lesson_type: LessonType
+  rate_type: RateType
   rate_per_lesson: number
   is_default: boolean
   teacher?: Teacher | null
@@ -255,10 +262,21 @@ export interface FinanceStudentRow {
   total_paid: number
 }
 
+export interface FinanceDayRow {
+  day_of_week: number
+  label: string
+  individual_lessons: number
+  group_lessons: number
+  total_lessons: number
+  total_revenue: number
+  teacher_pay_total: number
+}
+
 export interface FinanceSummary {
   schedule_id?: number | null
   period_start: string
   period_end: string
+  day_of_week?: number | null
   total_revenue: number
   teacher_pay_total: number
   net_revenue: number
@@ -269,6 +287,7 @@ export interface FinanceSummary {
   average_lesson_price: number
   revenue_by_subject: Record<string, number>
   revenue_by_lesson_type: Record<string, number>
+  days: FinanceDayRow[]
   teacher_breakdown: FinanceTeacherRow[]
   student_breakdown: FinanceStudentRow[]
   warnings: string[]
