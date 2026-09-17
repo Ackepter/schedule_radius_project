@@ -176,32 +176,50 @@ def seed_database(db: Session) -> dict:
     db.flush()
 
     # Групповые требования (группы формируются автоматически из общих слотов)
+    # Формат: (ученик, предмет, занятий/нед., длительность, педагог, обязательный, тип)
     group_requests = [
-        (students[0], subjects["math"], 1, 60, None, False),
-        (students[1], subjects["math"], 1, 60, None, False),
-        (students[2], subjects["math"], 1, 60, None, False),
-        (students[2], subjects["robots"], 1, 90, None, False),
-        (students[6], subjects["robots"], 1, 90, None, False),
-        (students[0], subjects["art"], 1, 90, None, False),
-        (students[1], subjects["art"], 1, 90, None, False),
-        (students[3], subjects["eng"], 1, 45, None, False),
-        (students[5], subjects["eng"], 1, 45, None, False),
-        (students[6], subjects["eng"], 1, 45, None, False),
-        (students[4], subjects["prog"], 1, 60, None, False),
-        (students[8], subjects["prog"], 1, 60, None, False),
-        (students[9], subjects["prog"], 1, 60, None, False),
+        (students[0], subjects["math"], 1, 60, None, False, LessonTypeEnum.group),
+        (students[1], subjects["math"], 1, 60, None, False, LessonTypeEnum.both),
+        (students[2], subjects["math"], 1, 60, None, False, LessonTypeEnum.group),
+        (students[2], subjects["robots"], 1, 90, None, False, LessonTypeEnum.group),
+        (students[6], subjects["robots"], 1, 90, None, False, LessonTypeEnum.group),
+        (students[0], subjects["art"], 1, 90, None, False, LessonTypeEnum.group),
+        (students[1], subjects["art"], 1, 90, None, False, LessonTypeEnum.group),
+        (students[3], subjects["eng"], 1, 45, None, False, LessonTypeEnum.group),
+        (students[5], subjects["eng"], 1, 45, None, False, LessonTypeEnum.group),
+        (students[6], subjects["eng"], 1, 45, None, False, LessonTypeEnum.group),
+        (students[4], subjects["prog"], 1, 60, None, False, LessonTypeEnum.group),
+        (students[8], subjects["prog"], 1, 60, None, False, LessonTypeEnum.group),
+        (students[9], subjects["prog"], 1, 60, None, False, LessonTypeEnum.group),
     ]
-    for st, subj, n, dur, pref, req in group_requests:
+    for st, subj, n, dur, pref, req, lt in group_requests:
         db.add(
             LessonRequest(
                 student_id=st.id, subject_id=subj.id,
-                lesson_type=LessonTypeEnum.group,
+                lesson_type=lt,
                 lessons_per_week=n, duration_minutes=dur,
                 preferred_teacher_id=(pref.id if pref else None),
                 teacher_is_required=req, priority=1,
-                notes="Групповое занятие. Группа формируется автоматически",
+                notes=(
+                    "Индивидуально и в группе. Группа формируется автоматически"
+                    if lt == LessonTypeEnum.both
+                    else "Групповое занятие. Группа формируется автоматически"
+                ),
             )
         )
+
+    db.flush()
+
+    # Исключения: Кузнецов Максим не может заниматься в группе по программированию
+    # вместе с Волковым Кириллом (автогруппа формируется из остальных учеников).
+    prog_exclusions = db.scalars(
+        select(LessonRequest).where(
+            LessonRequest.student_id == students[4].id,
+            LessonRequest.subject_id == subjects["prog"].id,
+        )
+    ).all()
+    for prog_req in prog_exclusions:
+        prog_req.excluded_students.append(students[8])
 
     db.flush()
 

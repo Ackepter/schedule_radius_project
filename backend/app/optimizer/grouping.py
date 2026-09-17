@@ -144,6 +144,19 @@ def _intersect_windows(
     return res
 
 
+def _incompatible(a: LessonRequest, b: LessonRequest) -> bool:
+    """Проверяет, нельзя ли помещать заявки a и b в одну группу."""
+    if a.student_id == b.student_id:
+        return False
+    for s in a.excluded_students:
+        if s.id == b.student_id:
+            return True
+    for s in b.excluded_students:
+        if s.id == a.student_id:
+            return True
+    return False
+
+
 def _student_windows(db: Session, student_id: int, duration_minutes: int) -> list[tuple[int, int, int]]:
     """День -> свободные интервалы ученика в абсолютных минутах (длина >= duration)."""
     settings = get_settings()
@@ -225,31 +238,21 @@ def form_groups(
             for c in clusters:
                 if len(c.members) >= max_size:
                     continue
-                if c.can_add(m):
-                    c.add(m)
-                    placed = True
-                    break
+                if not c.can_add(m):
+                    continue
+                if any(_incompatible(x.req, m.req) for x in c.members):
+                    continue
+                c.add(m)
+                placed = True
+                break
             if not placed:
                 clusters.append(_Cluster(members=[m], windows=m.windows))
 
         for c in clusters:
-            if len(c.members) >= min_size:
-                c.members.sort(key=lambda x: (x.req.student_id, x.req.id))
-                formed.append(
-                    FormedGroup(
-                        lesson_request_ids=[m.req.id for m in c.members],
-                        student_ids=[m.req.student_id for m in c.members],
-                        subject_id=subject_id,
-                        subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
-                        duration_minutes=duration,
-                        lessons_per_week=lpw,
-                        priority=max((m.req.priority or 1) for m in c.members),
-                        preferred_teacher_id=c.preferred_teacher_id,
-                        teacher_is_required=c.required_teacher_id is not None,
-                    )
-                )
-            else:
+            if len(c.members) < min_size:
                 for m in c.members:
+                    if not m.windows:
+                        continue
                     failed.append(
                         FailedGroup(
                             lesson_request_id=m.req.id,
@@ -262,5 +265,20 @@ def form_groups(
                             ),
                         )
                     )
+                continue
+            c.members.sort(key=lambda x: (x.req.student_id, x.req.id))
+            formed.append(
+                FormedGroup(
+                    lesson_request_ids=[m.req.id for m in c.members],
+                    student_ids=[m.req.student_id for m in c.members],
+                    subject_id=subject_id,
+                    subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
+                    duration_minutes=duration,
+                    lessons_per_week=lpw,
+                    priority=max((m.req.priority or 1) for m in c.members),
+                    preferred_teacher_id=c.preferred_teacher_id,
+                    teacher_is_required=c.required_teacher_id is not None,
+                )
+            )
 
     return formed, failed

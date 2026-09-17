@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
-from app.models.entities import LessonRequest, LessonTypeEnum
+from app.models.entities import LessonRequest, LessonTypeEnum, Student
 from app.schemas.schemas import (
     DataResponse,
     ListResponse,
@@ -30,6 +30,7 @@ def list_lesson_requests(
         selectinload(LessonRequest.student),
         selectinload(LessonRequest.subject),
         selectinload(LessonRequest.preferred_teacher),
+        selectinload(LessonRequest.excluded_students),
     )
     if student_id is not None:
         q = q.where(LessonRequest.student_id == student_id)
@@ -51,7 +52,15 @@ def list_lesson_requests(
 def create_lesson_request(
     body: LessonRequestCreate, db: Session = Depends(get_db)
 ):
-    obj = LessonRequest(**body.model_dump())
+    obj = LessonRequest(**body.model_dump(exclude={"excluded_student_ids"}))
+    if body.excluded_student_ids:
+        obj.excluded_students = (
+            db.execute(
+                select(Student).where(Student.id.in_(body.excluded_student_ids))
+            )
+            .scalars()
+            .all()
+        )
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -66,6 +75,7 @@ def get_lesson_request(lr_id: int, db: Session = Depends(get_db)):
             selectinload(LessonRequest.student),
             selectinload(LessonRequest.subject),
             selectinload(LessonRequest.preferred_teacher),
+            selectinload(LessonRequest.excluded_students),
         )
         .where(LessonRequest.id == lr_id)
     )
@@ -82,8 +92,17 @@ def update_lesson_request(
     obj = db.get(LessonRequest, lr_id)
     if not obj:
         raise HTTPException(status_code=404, detail="Lesson request not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True, exclude={"excluded_student_ids"})
+    for field, value in data.items():
         setattr(obj, field, value)
+    if body.excluded_student_ids is not None:
+        obj.excluded_students = (
+            db.execute(
+                select(Student).where(Student.id.in_(body.excluded_student_ids))
+            )
+            .scalars()
+            .all()
+        )
     db.commit()
     db.refresh(obj)
     return DataResponse(data=LessonRequestBase.model_validate(obj))

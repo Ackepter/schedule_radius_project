@@ -184,7 +184,11 @@ def _load_occurrences(
     lr_rows = db.execute(
         select(LessonRequest, Subject.name)
         .join(Subject, LessonRequest.subject_id == Subject.id)
-        .where(LessonRequest.lesson_type == LessonTypeEnum.individual)
+        .where(
+            LessonRequest.lesson_type.in_(
+                [LessonTypeEnum.individual, LessonTypeEnum.both]
+            )
+        )
     ).all()
     for lr, subj_name in lr_rows:
         student = db.get(Student, lr.student_id)
@@ -217,7 +221,11 @@ def _load_occurrences(
 
     group_reqs = db.execute(
         select(LessonRequest)
-        .where(LessonRequest.lesson_type == LessonTypeEnum.group)
+        .where(
+            LessonRequest.lesson_type.in_(
+                [LessonTypeEnum.group, LessonTypeEnum.both]
+            )
+        )
     ).scalars().all()
     formed, failed_groups = form_groups(
         db,
@@ -727,7 +735,7 @@ def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -
     if not occurrences and not failed_groups:
         return ScheduleResult(
             success=False,
-            message="Нет занятий для составления расписания. Добавьте активные требования учеников с типом 'individual' или 'group'."
+            message="Нет занятий для составления расписания. Добавьте активные требования учеников с типом 'individual', 'group' или 'both'."
         )
 
     opt_settings = db.scalars(select(OptimizerSettings).limit(1)).first()

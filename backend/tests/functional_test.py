@@ -45,7 +45,14 @@ def test_seed_and_list():
         for lr in s.get("lesson_requests", [])
         if lr.get("lesson_type") == "group"
     )
-    assert group_requests == 13, f"expected 13 group requests, got {group_requests}"
+    assert group_requests == 12, f"expected 12 group requests, got {group_requests}"
+    both_requests = sum(
+        1
+        for s in students
+        for lr in s.get("lesson_requests", [])
+        if lr.get("lesson_type") == "both"
+    )
+    assert both_requests == 1, f"expected 1 'both' request, got {both_requests}"
     print("seed+list OK")
 
 

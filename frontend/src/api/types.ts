@@ -1,6 +1,7 @@
 export const LessonTypeEnum = {
   individual: 'individual',
   group: 'group',
+  both: 'both',
 } as const
 export type LessonType = (typeof LessonTypeEnum)[keyof typeof LessonTypeEnum]
 
@@ -122,6 +123,7 @@ export interface LessonRequestBase {
   notes?: string | null
   subject?: Subject | null
   preferred_teacher?: Teacher | null
+  excluded_students: StudentBase[]
 }
 
 export interface LessonRequestList extends LessonRequestBase {

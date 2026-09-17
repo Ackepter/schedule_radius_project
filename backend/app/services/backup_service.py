@@ -28,7 +28,8 @@ from app.models.entities import (
 
 WIPE_TABLES = (
     "scheduled_lesson_participants, scheduled_lessons, schedules, lesson_requests, "
-    "availabilities, prices, students, teachers, rooms, subjects, parents"
+    "lesson_request_excluded_students, availabilities, prices, students, teachers, "
+    "rooms, subjects, parents"
 )
 
 TIME_FMT = "%H:%M"
@@ -107,10 +108,13 @@ def wipe_all_data(db: Session) -> None:
         db.execute(text("DELETE FROM scheduled_lesson_participants"))
         db.execute(text("DELETE FROM scheduled_lessons"))
         db.execute(text("DELETE FROM schedules"))
+        db.execute(text("DELETE FROM lesson_request_excluded_students"))
         db.execute(text("DELETE FROM lesson_requests"))
         db.execute(text("DELETE FROM availabilities"))
         db.execute(text("DELETE FROM prices"))
         db.execute(text("DELETE FROM students"))
+        db.execute(text("DELETE FROM teacher_subjects"))
+        db.execute(text("DELETE FROM room_subjects"))
         db.execute(text("DELETE FROM teachers"))
         db.execute(text("DELETE FROM rooms"))
         db.execute(text("DELETE FROM subjects"))
@@ -166,6 +170,7 @@ def export_all(db: Session) -> dict:
         .options(
             selectinload(LessonRequest.subject),
             selectinload(LessonRequest.preferred_teacher),
+            selectinload(LessonRequest.excluded_students),
         )
         .order_by(LessonRequest.id)
     ).all()
@@ -287,6 +292,10 @@ def export_all(db: Session) -> dict:
                         "teacher_is_required": r.teacher_is_required,
                         "priority": r.priority,
                         "notes": r.notes,
+                        "excluded_students": [
+                            full_name(s.first_name, s.last_name)
+                            for s in r.excluded_students
+                        ],
                     }
                     for r in requests_by_student.get(s.id, [])
                 ],
@@ -465,6 +474,7 @@ def import_all(db: Session, payload: dict) -> dict:
 
     # 5. Ученики и их требования
     student_map: dict[str, Student] = {}
+    pending_exclusions: list[tuple[LessonRequest, list[str]]] = []
     # (student_id, subject_id, lesson_type) -> id требования
     request_lookup: dict[tuple[int, int, LessonTypeEnum | str], int] = {}
     for st in payload.get("students", []) or []:
@@ -517,6 +527,18 @@ def import_all(db: Session, payload: dict) -> dict:
             request_lookup.setdefault(
                 (req.student_id, req.subject_id, req.lesson_type), req.id
             )
+            pending_exclusions.append((req, lr.get("excluded_students") or []))
+
+    # 5.1. Исключения: дети, с которыми нельзя заниматься в группе
+    for req, names in pending_exclusions:
+        for name in names:
+            excl = student_map.get(str(name).strip())
+            if excl is None or excl.id == req.student_id:
+                warnings.append(
+                    f"Ученик {req.student.full_name}: исключение «{name}» не найдено"
+                )
+                continue
+            req.excluded_students.append(excl)
 
     # 6. Цены
     for p in payload.get("prices", []) or []:

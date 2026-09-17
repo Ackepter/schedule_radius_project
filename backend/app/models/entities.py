@@ -57,12 +57,30 @@ scheduled_lesson_participants = Table(
     ),
 )
 
+lesson_request_excluded_students = Table(
+    "lesson_request_excluded_students",
+    Base.metadata,
+    Column(
+        "lesson_request_id",
+        Integer,
+        ForeignKey("lesson_requests.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "student_id",
+        Integer,
+        ForeignKey("students.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
 
 # ---------- Enums ----------
 
 class LessonTypeEnum(str, enum.Enum):
     individual = "individual"
     group = "group"
+    both = "both"
 
 
 class ScheduleStatusEnum(str, enum.Enum):
@@ -194,6 +212,11 @@ class LessonRequest(Base, TimestampMixin):
         "ScheduledLesson",
         secondary=scheduled_lesson_participants,
         back_populates="participants",
+    )
+    excluded_students: Mapped[list["Student"]] = relationship(
+        "Student",
+        secondary=lesson_request_excluded_students,
+        backref="excluded_from_requests",
     )
 
     @property

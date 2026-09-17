@@ -16,6 +16,7 @@ from app.models.entities import (
     teacher_subjects,
     room_subjects,
     scheduled_lesson_participants,
+    lesson_request_excluded_students,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "teacher_subjects",
     "room_subjects",
     "scheduled_lesson_participants",
+    "lesson_request_excluded_students",
 ]

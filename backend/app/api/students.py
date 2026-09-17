@@ -28,7 +28,9 @@ def list_students(
 ):
     q = select(Student).options(
         selectinload(Student.parent),
-        selectinload(Student.lesson_requests),
+        selectinload(Student.lesson_requests).selectinload(
+            LessonRequest.excluded_students
+        ),
     )
     if is_active is not None:
         q = q.where(Student.is_active == is_active)
@@ -63,7 +65,12 @@ def get_student(student_id: int, db: Session = Depends(get_db)):
         select(Student)
         .options(
             selectinload(Student.parent),
-            selectinload(Student.lesson_requests).selectinload(LessonRequest.subject),
+            selectinload(Student.lesson_requests).selectinload(
+                LessonRequest.subject
+            ),
+            selectinload(Student.lesson_requests).selectinload(
+                LessonRequest.excluded_students
+            ),
         )
         .where(Student.id == student_id)
     )

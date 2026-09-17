@@ -65,6 +65,7 @@ interface LessonReqForm {
   teacher_is_required: boolean
   priority: number
   notes: string
+  excluded_student_ids: number[]
 }
 
 function makeEmptyLR(studentId: number): LessonReqForm {
@@ -78,7 +79,14 @@ function makeEmptyLR(studentId: number): LessonReqForm {
     teacher_is_required: false,
     priority: 1,
     notes: '',
+    excluded_student_ids: [],
   }
+}
+
+function lessonTypeLabel(t: string): string {
+  if (t === LessonTypeEnum.both) return 'Индивидуально и в группе'
+  if (t === LessonTypeEnum.group) return 'Групповое'
+  return 'Индивидуальное'
 }
 
 export default function Students() {
@@ -261,6 +269,7 @@ export default function Students() {
       teacher_is_required: lr.teacher_is_required,
       priority: lr.priority,
       notes: lr.notes || '',
+      excluded_student_ids: (lr.excluded_students ?? []).map((s) => s.id),
     })
     setLrEditId(lr.id)
     setLrOpen(true)
@@ -277,6 +286,7 @@ export default function Students() {
       teacher_is_required: lrForm.teacher_is_required,
       priority: lrForm.priority,
       notes: lrForm.notes || null,
+      excluded_student_ids: lrForm.excluded_student_ids,
     }
     try {
       if (lrEditId !== null) {
@@ -315,6 +325,10 @@ export default function Students() {
     if (!id) return '—'
     const t = teachers.find((tt) => tt.id === id)
     return t ? `${t.last_name} ${t.first_name}` : '—'
+  }
+  const getStudentName = (id: number) => {
+    const st = items.find((s) => s.id === id)
+    return st ? `${st.last_name} ${st.first_name}` : '(удалён)'
   }
 
   return (
@@ -416,6 +430,41 @@ export default function Students() {
             <Select value={lrForm.lesson_type} label="Тип занятия" onChange={(e) => setLrForm({ ...lrForm, lesson_type: e.target.value })}>
               <MenuItem value="individual">Индивидуальное</MenuItem>
               <MenuItem value="group">Групповое</MenuItem>
+              <MenuItem value="both">Индивидуально и в группе</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel>Не заниматься в группе с</InputLabel>
+            <Select
+              multiple
+              value={lrForm.excluded_student_ids}
+              label="Не заниматься в группе с"
+              onChange={(e) => {
+                const value = e.target.value
+                setLrForm({
+                  ...lrForm,
+                  excluded_student_ids: Array.isArray(value) ? value.map(Number) : [],
+                })
+              }}
+              renderValue={(selected) =>
+                selected.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">Нет ограничений</Typography>
+                ) : (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {(selected as number[]).map((id) => (
+                      <Chip key={id} size="small" label={getStudentName(id)} />
+                    ))}
+                  </Box>
+                )
+              }
+            >
+              {items
+                .filter((s) => s.id !== lrForm.student_id)
+                .map((s) => (
+                  <MenuItem key={s.id} value={s.id}>
+                    {s.last_name} {s.first_name}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
           <TextField label="Занятий в неделю" type="number" value={lrForm.lessons_per_week} onChange={(e) => setLrForm({ ...lrForm, lessons_per_week: Number(e.target.value) })} fullWidth />
@@ -480,13 +529,19 @@ export default function Students() {
                   <Paper key={lr.id} sx={{ p: 2, mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box>
                       <Typography variant="subtitle1">
-                        {getSubjectName(lr.subject_id)} — {lr.lesson_type === 'individual' ? 'Индивидуальное' : 'Групповое'}
+                        {getSubjectName(lr.subject_id)} — {lessonTypeLabel(lr.lesson_type)}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         {lr.lessons_per_week} раз(а) в неделю, {lr.duration_minutes} мин.
                         {lr.preferred_teacher_id && ` · Педагог: ${getTeacherName(lr.preferred_teacher_id)}`}
                         {lr.teacher_is_required && ' (обязательный)'}
                         {' · Приоритет: '}{lr.priority}
+                        {(lr.excluded_students?.length ?? 0) > 0 && (
+                          <span>
+                            {' · Вне группы: '}
+                            {lr.excluded_students!.map((s) => `${s.last_name} ${s.first_name}`).join(', ')}
+                          </span>
+                        )}
                       </Typography>
                     </Box>
                     <Box>

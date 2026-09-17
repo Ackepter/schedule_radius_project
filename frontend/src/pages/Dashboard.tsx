@@ -35,7 +35,9 @@ async function getStats(): Promise<Stats> {
   const groupRequests = students.reduce(
     (sum, st) =>
       sum +
-      (st.lesson_requests ?? []).filter((lr) => lr.lesson_type === 'group').length,
+      (st.lesson_requests ?? []).filter(
+        (lr) => lr.lesson_type === 'group' || lr.lesson_type === 'both',
+      ).length,
     0,
   )
   return {

@@ -264,6 +264,7 @@ class LessonRequestBase(SchemaBase):
     notes: Optional[str] = None
     subject: Optional[SubjectBase] = None
     preferred_teacher: Optional[TeacherBase] = None
+    excluded_students: list["StudentBase"] = []
 
 
 class LessonRequestCreate(SchemaBase):
@@ -276,6 +277,7 @@ class LessonRequestCreate(SchemaBase):
     teacher_is_required: bool = False
     priority: int = Field(default=1, ge=1, le=3)
     notes: Optional[str] = None
+    excluded_student_ids: list[int] = Field(default_factory=list)
 
 
 class LessonRequestUpdate(SchemaBase):
@@ -288,6 +290,7 @@ class LessonRequestUpdate(SchemaBase):
     teacher_is_required: Optional[bool] = None
     priority: Optional[int] = Field(default=None, ge=1, le=3)
     notes: Optional[str] = None
+    excluded_student_ids: Optional[list[int]] = None
 
 
 class LessonRequestList(LessonRequestBase):

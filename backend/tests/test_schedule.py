@@ -414,3 +414,56 @@ def test_group_composition_preserved(fresh_db):
     assert placed, "группа должна разместиться"
     for l in placed:
         assert sorted(l.get("students") or []) == original_ids
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 13 — одно требование типа «both» даёт и индивидуальное, и групповое
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_both_type_generates_individual_and_group(fresh_db):
+    db = fresh_db
+    s = _subject(db)
+    t = _teacher(db, [s])
+    r = _room(db, 10, [s])
+    st1 = _student(db, ALL_DAYS, name="A")
+    st2 = _student(db, ALL_DAYS, name="B")
+    _request(db, st1, s, lesson_type=LessonTypeEnum.both)
+    _request(db, st2, s, lesson_type=LessonTypeEnum.group)
+    db.commit()
+
+    res = run_schedule_generation(db, "Неделя", date.today())
+    assert res.success, res.message
+    ind = [l for l in res.scheduled if l["lesson_type"] == "individual" and st1.id in (l.get("students") or [])]
+    grp = [l for l in res.scheduled if l["lesson_type"] == "group" and st1.id in (l.get("students") or [])]
+    assert ind, "по требованию 'both' должно появиться индивидуальное занятие"
+    assert grp, "по требованию 'both' ученик должен попасть в группу"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 14 — несовместимые дети не попадают в одну группу
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_incompatible_students_not_grouped_together(fresh_db):
+    db = fresh_db
+    s = _subject(db)
+    t = _teacher(db, [s])
+    r = _room(db, 10, [s])
+    a = _student(db, ALL_DAYS, name="A")
+    b = _student(db, ALL_DAYS, name="B")
+    c = _student(db, ALL_DAYS, name="C")
+    lr_a = _request(db, a, s, lesson_type=LessonTypeEnum.group)
+    lr_b = _request(db, b, s, lesson_type=LessonTypeEnum.group)
+    lr_c = _request(db, c, s, lesson_type=LessonTypeEnum.group)
+    lr_a.excluded_students = [b]
+    db.commit()
+
+    res = run_schedule_generation(db, "Неделя", date.today())
+    assert res.success, res.message
+    placed = [l for l in res.scheduled if l["lesson_type"] == "group"]
+    assert placed, "совместимая пара должна образовать группу"
+    for l in placed:
+        member_ids = sorted(l.get("students") or [])
+        assert a.id in member_ids and c.id in member_ids, f"неверный состав группы: {member_ids}"
+        assert b.id not in member_ids, "исключённый ученик не должен попасть в группу"
+    assert any("Недостаточно учеников" in u.reason for u in res.unscheduled), \
+        "исключённый ученик должен остаться без группы и попасть в отчёт"
