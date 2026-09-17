@@ -18,6 +18,7 @@ from app.models.entities import (
     Student,
     Subject,
     Teacher,
+    TeacherRate,
 )
 
 DAYS = [0, 1, 2, 3, 4, 5]  # Пн..Сб
@@ -147,6 +148,25 @@ def seed_database(db: Session) -> dict:
         Price(subject_id=subjects["eng"].id, lesson_type=LessonTypeEnum.group, min_participants=6, max_participants=10, price_per_student=500),
         Price(subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.group, min_participants=2, max_participants=4, price_per_student=900),
         Price(subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.group, min_participants=5, max_participants=8, price_per_student=750),
+        Price(subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.group, min_participants=2, max_participants=8, price_per_student=600),
+    ])
+
+    # Ставки педагогам (по умолчанию и индивидуальные)
+    db.add_all([
+        # Умолчания по предметам/типам (teacher_id=NULL)
+        TeacherRate(teacher_id=None, subject_id=subjects["math"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=500),
+        TeacherRate(teacher_id=None, subject_id=subjects["eng"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=450),
+        TeacherRate(teacher_id=None, subject_id=subjects["rus"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400),
+        TeacherRate(teacher_id=None, subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=600),
+        TeacherRate(teacher_id=None, subject_id=subjects["prog"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=550),
+        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=400),
+        TeacherRate(teacher_id=None, subject_id=subjects["math"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1200),
+        TeacherRate(teacher_id=None, subject_id=subjects["eng"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1000),
+        TeacherRate(teacher_id=None, subject_id=subjects["robots"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=1400),
+        TeacherRate(teacher_id=None, subject_id=subjects["art"].id, lesson_type=LessonTypeEnum.group, rate_per_lesson=800),
+        # Индивидуальные ставки отдельных педагогов
+        TeacherRate(teacher_id=teachers[0].id, subject_id=subjects["math"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=600),
+        TeacherRate(teacher_id=teachers[4].id, subject_id=subjects["prog"].id, lesson_type=LessonTypeEnum.individual, rate_per_lesson=700),
     ])
 
     # Индивидуальные требования (10-15)

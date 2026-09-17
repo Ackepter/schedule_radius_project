@@ -24,11 +24,12 @@ from app.models.entities import (
     Student,
     Subject,
     Teacher,
+    TeacherRate,
 )
 
 WIPE_TABLES = (
     "scheduled_lesson_participants, scheduled_lessons, schedules, lesson_requests, "
-    "lesson_request_excluded_students, availabilities, prices, students, teachers, "
+    "lesson_request_excluded_students, availabilities, teacher_rates, prices, students, teachers, "
     "rooms, subjects, parents"
 )
 
@@ -111,6 +112,7 @@ def wipe_all_data(db: Session) -> None:
         db.execute(text("DELETE FROM lesson_request_excluded_students"))
         db.execute(text("DELETE FROM lesson_requests"))
         db.execute(text("DELETE FROM availabilities"))
+        db.execute(text("DELETE FROM teacher_rates"))
         db.execute(text("DELETE FROM prices"))
         db.execute(text("DELETE FROM students"))
         db.execute(text("DELETE FROM teacher_subjects"))
@@ -176,6 +178,13 @@ def export_all(db: Session) -> dict:
     ).all()
     prices = db.scalars(
         select(Price).options(selectinload(Price.subject)).order_by(Price.id)
+    ).all()
+    teacher_rates = db.scalars(
+        select(TeacherRate)
+        .options(
+            selectinload(TeacherRate.teacher), selectinload(TeacherRate.subject)
+        )
+        .order_by(TeacherRate.id)
     ).all()
     schedules = db.scalars(
         select(Schedule).options(selectinload(Schedule.lessons)).order_by(Schedule.id)
@@ -311,6 +320,19 @@ def export_all(db: Session) -> dict:
                 "price_per_student": p.price_per_student,
             }
             for p in prices
+        ],
+        "teacher_rates": [
+            {
+                "teacher": (
+                    full_name(r.teacher.first_name, r.teacher.last_name)
+                    if r.teacher is not None
+                    else None
+                ),
+                "subject": subject_names.get(r.subject_id),
+                "lesson_type": _fmt_lesson_type(r.lesson_type),
+                "rate_per_lesson": r.rate_per_lesson,
+            }
+            for r in teacher_rates
         ],
         "optimizer_settings": (
             {
@@ -559,6 +581,31 @@ def import_all(db: Session, payload: dict) -> dict:
             )
         )
 
+    # 7. Ставки педагогов
+    for rr in payload.get("teacher_rates", []) or []:
+        subj_name = str(rr.get("subject") or "").strip()
+        subj = subject_map.get(subj_name) if subj_name else None
+        if subj is None:
+            warnings.append(f"Ставка педагога: направление «{subj_name}» не найдено")
+            continue
+        teacher_name = rr.get("teacher")
+        teacher_obj = (
+            teacher_map.get(str(teacher_name).strip()) if teacher_name else None
+        )
+        if teacher_name and teacher_obj is None:
+            warnings.append(
+                f"Ставка педагога: педагог «{teacher_name}» не найден, ставка пропущена"
+            )
+            continue
+        db.add(
+            TeacherRate(
+                teacher_id=teacher_obj.id if teacher_obj else None,
+                subject_id=subj.id,
+                lesson_type=_parse_lesson_type(rr.get("lesson_type")),
+                rate_per_lesson=float(rr.get("rate_per_lesson") or 0),
+            )
+        )
+
     # 8. Настройки оптимизатора
     opt = db.scalars(select(OptimizerSettings).limit(1)).first()
     if opt is None:
@@ -654,6 +701,7 @@ def import_all(db: Session, payload: dict) -> dict:
         "parents": len(parent_map),
         "students": len(student_map),
         "prices": len(payload.get("prices", []) or []),
+        "teacher_rates": len(payload.get("teacher_rates", []) or []),
         "schedules": len(payload.get("schedules", []) or []),
         "warnings": warnings,
     }

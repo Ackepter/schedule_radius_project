@@ -104,6 +104,21 @@ def test_pricing_and_finance(sched_id):
     assert r.status_code == 200
     data = r.json()["data"]
     print(f"finance OK revenue={data['total_revenue']} indiv={data['individual_lessons']} group={data['group_lessons']}")
+    assert data["total_revenue"] > 0
+    assert data["teacher_pay_total"] > 0, "педагогам должна быть назначена оплата"
+    assert data["net_revenue"] == round(data["total_revenue"] - data["teacher_pay_total"], 2)
+    assert data["teacher_breakdown"], "нет разбивки по педагогам"
+    assert data["student_breakdown"], "нет разбивки по ученикам"
+
+    # валидация: ставка педагога не может превышать выручку центра
+    subjects = client.get("/api/subjects").json()["items"]
+    math = next(s for s in subjects if s["name"] == "Математика")
+    r = client.post("/api/finance/teacher-rates", json={
+        "teacher_id": None, "subject_id": math["id"],
+        "lesson_type": "individual", "rate_per_lesson": 10_000_000,
+    })
+    assert r.status_code == 400, f"переплата педагогу должна отклоняться: {r.status_code} {r.text[:200]}"
+    print("teacher-rate overpay validation OK")
 
 
 def test_export(sched_id):

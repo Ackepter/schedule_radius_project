@@ -338,6 +338,35 @@ class PriceList(PriceBase):
     pass
 
 
+class TeacherRateBase(SchemaBase):
+    id: int
+    teacher_id: Optional[int] = None
+    subject_id: int
+    lesson_type: LessonTypeEnum
+    rate_per_lesson: float = Field(ge=0.0)
+    is_default: bool = False
+    teacher: Optional[TeacherBase] = None
+    subject: Optional[SubjectBase] = None
+
+
+class TeacherRateCreate(SchemaBase):
+    teacher_id: Optional[int] = Field(default=None, ge=1)
+    subject_id: int = Field(..., ge=1)
+    lesson_type: LessonTypeEnum
+    rate_per_lesson: float = Field(..., ge=0.0)
+
+
+class TeacherRateUpdate(SchemaBase):
+    teacher_id: Optional[int] = Field(default=None, ge=1)
+    subject_id: Optional[int] = Field(default=None, ge=1)
+    lesson_type: Optional[LessonTypeEnum] = None
+    rate_per_lesson: Optional[float] = Field(default=None, ge=0.0)
+
+
+class TeacherRateList(TeacherRateBase):
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Schedule + ScheduledLesson
 # ---------------------------------------------------------------------------
@@ -606,11 +635,31 @@ class ConflictCheckResponse(SchemaBase):
 # ---------------------------------------------------------------------------
 
 
+class FinanceTeacherRow(SchemaBase):
+    teacher_id: int
+    teacher_name: str
+    individual_lessons: int = 0
+    group_lessons: int = 0
+    total_lessons: int = 0
+    total_pay: float = 0.0
+
+
+class FinanceStudentRow(SchemaBase):
+    student_id: int
+    student_name: str
+    individual_lessons: int = 0
+    group_lessons: int = 0
+    total_lessons: int = 0
+    total_paid: float = 0.0
+
+
 class FinanceSummary(SchemaBase):
     schedule_id: Optional[int] = None
     period_start: date
     period_end: date
     total_revenue: float = 0.0
+    teacher_pay_total: float = 0.0
+    net_revenue: float = 0.0
     total_lessons: int = 0
     individual_lessons: int = 0
     group_lessons: int = 0
@@ -618,7 +667,11 @@ class FinanceSummary(SchemaBase):
     average_lesson_price: float = 0.0
     revenue_by_subject: dict[str, float] = {}
     revenue_by_lesson_type: dict[str, float] = {}
+    teacher_breakdown: list[FinanceTeacherRow] = []
+    student_breakdown: list[FinanceStudentRow] = []
+    warnings: list[str] = []
 
     def model_post_init(self, __context) -> None:
         if self.total_lessons > 0:
             self.average_lesson_price = self.total_revenue / self.total_lessons
+        self.net_revenue = round(self.total_revenue - self.teacher_pay_total, 2)

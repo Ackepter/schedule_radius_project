@@ -15,6 +15,7 @@ from app.api import (
     students,
     subjects,
     teachers,
+    teacher_rates,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -45,6 +46,11 @@ api_router.include_router(
 )
 api_router.include_router(
     finance.router, prefix="/finance", tags=["finance"]
+)
+api_router.include_router(
+    teacher_rates.router,
+    prefix="/finance/teacher-rates",
+    tags=["finance"],
 )
 api_router.include_router(export.router, prefix="/export", tags=["export"])
 api_router.include_router(seed.router, prefix="/seed", tags=["seed"])

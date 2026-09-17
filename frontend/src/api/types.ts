@@ -140,6 +140,17 @@ export interface Price {
   subject?: Subject | null
 }
 
+export interface TeacherRate {
+  id: number
+  teacher_id?: number | null
+  subject_id: number
+  lesson_type: LessonType
+  rate_per_lesson: number
+  is_default: boolean
+  teacher?: Teacher | null
+  subject?: Subject | null
+}
+
 export interface ScheduleBase {
   id: number
   name: string
@@ -226,11 +237,31 @@ export interface ConflictCheckResponse {
   conflicts: ConflictDetail[]
 }
 
+export interface FinanceTeacherRow {
+  teacher_id: number
+  teacher_name: string
+  individual_lessons: number
+  group_lessons: number
+  total_lessons: number
+  total_pay: number
+}
+
+export interface FinanceStudentRow {
+  student_id: number
+  student_name: string
+  individual_lessons: number
+  group_lessons: number
+  total_lessons: number
+  total_paid: number
+}
+
 export interface FinanceSummary {
   schedule_id?: number | null
   period_start: string
   period_end: string
   total_revenue: number
+  teacher_pay_total: number
+  net_revenue: number
   total_lessons: number
   individual_lessons: number
   group_lessons: number
@@ -238,6 +269,9 @@ export interface FinanceSummary {
   average_lesson_price: number
   revenue_by_subject: Record<string, number>
   revenue_by_lesson_type: Record<string, number>
+  teacher_breakdown: FinanceTeacherRow[]
+  student_breakdown: FinanceStudentRow[]
+  warnings: string[]
 }
 
 export interface ListResponse<T> {

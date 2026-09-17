@@ -296,6 +296,33 @@ class Price(Base):
     subject: Mapped["Subject"] = relationship("Subject")
 
 
+class TeacherRate(Base):
+    """Оплата педагогу за одно занятие.
+
+    teacher_id = NULL — ставка по умолчанию для пары (subject, lesson_type).
+    teacher_id задан — индивидуальная ставка конкретного педагога (переопределяет умолчание).
+    """
+
+    __tablename__ = "teacher_rates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    teacher_id = Column(
+        Integer, ForeignKey("teachers.id", ondelete="CASCADE"), nullable=True
+    )
+    subject_id = Column(
+        Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False
+    )
+    lesson_type = Column(Enum(LessonTypeEnum), nullable=False)
+    rate_per_lesson = Column(Float, nullable=False)
+
+    teacher: Mapped[Optional["Teacher"]] = relationship("Teacher")
+    subject: Mapped["Subject"] = relationship("Subject")
+
+    @property
+    def is_default(self) -> bool:
+        return self.teacher_id is None
+
+
 class OptimizerSettings(Base):
     __tablename__ = "optimizer_settings"
 
