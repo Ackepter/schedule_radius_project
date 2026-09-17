@@ -295,54 +295,6 @@ class LessonRequestList(LessonRequestBase):
 
 
 # ---------------------------------------------------------------------------
-# GroupLesson
-# ---------------------------------------------------------------------------
-
-
-class GroupLessonBase(SchemaBase):
-    id: int
-    title: str
-    subject_id: int
-    teacher_id: Optional[int] = None
-    teacher_is_required: bool = False
-    duration_minutes: int = Field(default=60, gt=0)
-    lessons_per_week: int = Field(default=1, ge=1)
-    max_size: int = Field(default=6, ge=1)
-    comment: Optional[str] = None
-    subject: Optional[SubjectBase] = None
-    teacher: Optional[TeacherBase] = None
-    participants: list[StudentBase] = []
-
-
-class GroupLessonCreate(SchemaBase):
-    title: str = Field(..., min_length=1, max_length=300)
-    subject_id: int = Field(..., ge=1)
-    teacher_id: Optional[int] = Field(default=None, ge=1)
-    teacher_is_required: bool = False
-    duration_minutes: int = Field(default=60, gt=0)
-    lessons_per_week: int = Field(default=1, ge=1)
-    max_size: int = Field(default=6, ge=1)
-    comment: Optional[str] = None
-    participant_ids: list[int] = []
-
-
-class GroupLessonUpdate(SchemaBase):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=300)
-    subject_id: Optional[int] = Field(default=None, ge=1)
-    teacher_id: Optional[int] = Field(default=None, ge=1)
-    teacher_is_required: Optional[bool] = None
-    duration_minutes: Optional[int] = Field(default=None, gt=0)
-    lessons_per_week: Optional[int] = Field(default=None, ge=1)
-    max_size: Optional[int] = Field(default=None, ge=1)
-    comment: Optional[str] = None
-    participant_ids: Optional[list[int]] = None
-
-
-class GroupLessonList(GroupLessonBase):
-    pass
-
-
-# ---------------------------------------------------------------------------
 # Price
 # ---------------------------------------------------------------------------
 
@@ -415,7 +367,7 @@ class ScheduledLessonBase(SchemaBase):
     lesson_type: LessonTypeEnum
     lesson_request_id: Optional[int] = None
     student_id: Optional[int] = None
-    group_lesson_id: Optional[int] = None
+    lesson_request_ids: list[int] = []
     day_of_week: int = Field(ge=0, le=6)
     start_time: time
     end_time: time
@@ -423,11 +375,17 @@ class ScheduledLessonBase(SchemaBase):
     room_id: int
 
 
+class ScheduledLessonParticipant(SchemaBase):
+    lesson_request_id: int
+    student: Optional[StudentBase] = None
+    subject: Optional[SubjectBase] = None
+
+
 class ScheduledLessonDetail(ScheduledLessonBase):
     schedule: Optional[ScheduleBase] = None
     lesson_request: Optional[LessonRequestBase] = None
     student: Optional[StudentBase] = None
-    group_lesson: Optional[GroupLessonBase] = None
+    participants: list[ScheduledLessonParticipant] = []
     teacher: Optional[TeacherBase] = None
     room: Optional[RoomBase] = None
 
@@ -437,7 +395,7 @@ class ScheduledLessonCreate(SchemaBase):
     lesson_type: LessonTypeEnum
     lesson_request_id: Optional[int] = Field(default=None, ge=1)
     student_id: Optional[int] = Field(default=None, ge=1)
-    group_lesson_id: Optional[int] = Field(default=None, ge=1)
+    lesson_request_ids: list[int] = Field(default_factory=list)
     day_of_week: int = Field(..., ge=0, le=6)
     start_time: time
     end_time: time
@@ -456,7 +414,7 @@ class ScheduledLessonUpdate(SchemaBase):
     lesson_type: Optional[LessonTypeEnum] = None
     lesson_request_id: Optional[int] = Field(default=None, ge=1)
     student_id: Optional[int] = Field(default=None, ge=1)
-    group_lesson_id: Optional[int] = Field(default=None, ge=1)
+    lesson_request_ids: Optional[list[int]] = None
     day_of_week: Optional[int] = Field(default=None, ge=0, le=6)
     start_time: Optional[time] = None
     end_time: Optional[time] = None
@@ -484,11 +442,15 @@ class OptimizerSettingsBase(SchemaBase):
     late_hour: int = Field(default=20, ge=0, le=23)
     weight_teacher_balance: float = Field(default=30.0, ge=0.0)
     weight_room_balance: float = Field(default=10.0, ge=0.0)
+    group_min_size: int = Field(default=2, ge=2)
+    group_max_size: int = Field(default=8, ge=2)
 
     @model_validator(mode="after")
     def _check_hours(self) -> "OptimizerSettingsBase":
         if self.early_hour >= self.late_hour:
             raise ValueError("early_hour must be earlier than late_hour")
+        if self.group_min_size > self.group_max_size:
+            raise ValueError("group_min_size must be <= group_max_size")
         return self
 
 
@@ -502,11 +464,15 @@ class OptimizerSettingsCreate(SchemaBase):
     late_hour: int = Field(default=20, ge=0, le=23)
     weight_teacher_balance: float = Field(default=30.0, ge=0.0)
     weight_room_balance: float = Field(default=10.0, ge=0.0)
+    group_min_size: int = Field(default=2, ge=2)
+    group_max_size: int = Field(default=8, ge=2)
 
     @model_validator(mode="after")
     def _check_hours(self) -> "OptimizerSettingsCreate":
         if self.early_hour >= self.late_hour:
             raise ValueError("early_hour must be earlier than late_hour")
+        if self.group_min_size > self.group_max_size:
+            raise ValueError("group_min_size must be <= group_max_size")
         return self
 
 
@@ -520,6 +486,8 @@ class OptimizerSettingsUpdate(SchemaBase):
     late_hour: Optional[int] = Field(default=None, ge=0, le=23)
     weight_teacher_balance: Optional[float] = Field(default=None, ge=0.0)
     weight_room_balance: Optional[float] = Field(default=None, ge=0.0)
+    group_min_size: Optional[int] = Field(default=None, ge=2)
+    group_max_size: Optional[int] = Field(default=None, ge=2)
 
 
 # ---------------------------------------------------------------------------
@@ -599,7 +567,7 @@ class ConflictCheckRequest(SchemaBase):
     teacher_id: int = Field(..., ge=1)
     room_id: int = Field(..., ge=1)
     student_id: Optional[int] = Field(default=None, ge=1)
-    group_lesson_id: Optional[int] = Field(default=None, ge=1)
+    lesson_request_ids: list[int] = Field(default_factory=list)
     exclude_lesson_id: Optional[int] = Field(default=None, ge=1)
 
     @model_validator(mode="after")

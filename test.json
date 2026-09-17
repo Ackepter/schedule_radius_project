@@ -196,20 +196,6 @@
     }
   ],
 
-  "group_lessons": [
-    {
-      "title": "Бочче группа",
-      "subject": "Бочче",
-      "teacher": "Харитонова Е.Г.",
-      "teacher_is_required": false,
-      "duration_minutes": 60,
-      "lessons_per_week": 1,
-      "max_size": null,
-      "comment": null,
-      "students": ["Владимир С.", "Федотов Даниил"]
-    }
-  ],
-
   "prices": [
     {
       "subject": "Нейрокоррекция",
@@ -275,8 +261,8 @@
         },
         {
           "lesson_type": "group",
-          "group": "Бочче группа",
           "subject": "Бочче",
+          "participants": ["С. Владимир", "Федотов Даниил"],
           "day_of_week": 1,
           "start_time": "15:00",
           "end_time": "16:00",

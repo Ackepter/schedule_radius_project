@@ -14,14 +14,12 @@ from app.core.database import Base, SessionLocal, engine
 from app.models.entities import (
     Availability,
     EntityTypeEnum,
-    GroupLesson,
     LessonRequest,
     LessonTypeEnum,
     Room,
     Student,
     Subject,
     Teacher,
-    group_lesson_participants,
     room_subjects,
     teacher_subjects,
 )
@@ -102,16 +100,13 @@ def _request(db, student, subject, lessons=1, duration=60,
     return lr
 
 
-def _group(db, name, subject, teacher, student_ids):
-    g = GroupLesson(title=name, subject_id=subject.id,
-                    teacher_id=teacher.id, lessons_per_week=1)
-    db.add(g)
-    db.flush()
-    for sid in student_ids:
-        db.execute(group_lesson_participants.insert().values(
-            group_lesson_id=g.id, student_id=sid
-        ))
-    return g
+def _group_request(db, students, subject, lessons=1, duration=60,
+                   preferred_teacher=None, teacher_required=False):
+    for st in students:
+        _request(db, st, subject, lessons=lessons, duration=duration,
+                 lesson_type=LessonTypeEnum.group,
+                 preferred_teacher=preferred_teacher,
+                 teacher_required=teacher_required)
 
 
 ALL_DAYS = list(range(6))
@@ -226,7 +221,7 @@ def test_no_student_double_booking(fresh_db):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Тест 5 — групповое занятие учитывает доступность всех участников
+#  Тест 5 — группа учитывает доступность всех участников
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_group_respects_all_participants_availability(fresh_db):
@@ -238,15 +233,18 @@ def test_group_respects_all_participants_availability(fresh_db):
     st2 = _student(db, [3], name="Чт")  # только чт — нет общего дня
     st3 = _student(db, [1], name="Вт2")
 
-    _group(db, "Нет общего", s, t, [st1.id, st2.id])
+    # без общего свободного дня группа не формируется и не размещается
+    _group_request(db, [st1, st2], s)
     db.commit()
     res = run_schedule_generation(db, "Неделя", date.today())
     assert res.success, res.message
     assert not any(l["lesson_type"] == "group" for l in res.scheduled), \
         "группа без общего дня не может быть размещена"
+    assert any("Недостаточно учеников" in u.reason for u in res.unscheduled), \
+        "одиночная групповая заявка должна попасть в отчёт неразмещённых"
 
-    # контроль: двое с общим днём
-    _group(db, "Есть общий", s, t, [st1.id, st3.id])
+    # контроль: двое с общим днём образуют группу
+    _group_request(db, [st3], s)
     db.commit()
     res2 = run_schedule_generation(db, "Неделя2", date.today())
     assert res2.success, res2.message
@@ -266,7 +264,7 @@ def test_group_not_in_undersized_room(fresh_db):
     small = _room(db, 2, [s], name="Мал")
     big = _room(db, 10, [s], name="Бол")
     students = [_student(db, ALL_DAYS, name=f"S{i}") for i in range(5)]
-    _group(db, "Пятеро", s, t, [s.id for s in students])
+    _group_request(db, students, s)
     db.commit()
 
     res = run_schedule_generation(db, "Неделя", date.today())
@@ -372,7 +370,7 @@ def test_infeasible_schedule_reports_conflict_free(fresh_db):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Тест 11 — индивидуальные и групповые занятия сосуществуют
+#  Тест 11 — индивидуальные и групповые занятия сосуществуют («всё сразу»)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_individual_and_group_lessons_together(fresh_db):
@@ -382,8 +380,9 @@ def test_individual_and_group_lessons_together(fresh_db):
     r = _room(db, 10, [s])
     st1 = _student(db, ALL_DAYS, name="A")
     st2 = _student(db, ALL_DAYS, name="B")
+    # у st1 одновременно и индивидуальное, и групповое требование
     _request(db, st1, s, lessons=2)
-    _group(db, "Группа", s, t, [st1.id, st2.id])
+    _group_request(db, [st1, st2], s)
     db.commit()
 
     res = run_schedule_generation(db, "Неделя", date.today())
@@ -391,10 +390,12 @@ def test_individual_and_group_lessons_together(fresh_db):
     types = {l["lesson_type"] for l in res.scheduled}
     assert "individual" in types
     assert "group" in types
+    st1_lessons = [l for l in res.scheduled if st1.id in (l.get("students") or [])]
+    assert len(st1_lessons) >= 3, "у ребёнка должны быть и индивид., и групповые занятия"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Тест 12 — алгоритм не изменяет состав групп
+#  Тест 12 — состав сформированной группы фиксирован (не меняется оптимизатором)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_group_composition_preserved(fresh_db):
@@ -404,12 +405,12 @@ def test_group_composition_preserved(fresh_db):
     r = _room(db, 10, [s])
     studs = [_student(db, ALL_DAYS, name=f"S{i}") for i in range(4)]
     original_ids = sorted(st.id for st in studs)
-    g = _group(db, "Группа", s, t, original_ids)
+    _group_request(db, studs, s)
     db.commit()
 
     res = run_schedule_generation(db, "Неделя", date.today())
     assert res.success, res.message
-    placed = [l for l in res.scheduled if l["group_lesson_id"] == g.id]
+    placed = [l for l in res.scheduled if l["lesson_type"] == "group"]
     assert placed, "группа должна разместиться"
     for l in placed:
         assert sorted(l.get("students") or []) == original_ids

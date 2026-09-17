@@ -1,9 +1,15 @@
 import json
 from datetime import date, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import Schedule, ScheduleStatusEnum, ScheduledLesson
+from app.models.entities import (
+    LessonRequest,
+    Schedule,
+    ScheduleStatusEnum,
+    ScheduledLesson,
+)
 from app.optimizer.scheduler import (
     ScheduleResult,
     run_schedule_generation,
@@ -27,17 +33,27 @@ def generate_schedule(db: Session, name: str, week_start: date) -> ScheduleGener
     db.flush()
 
     for item in result.scheduled:
+        lesson_request_ids = item.get("lesson_request_ids") or []
+        participants = (
+            db.execute(
+                select(LessonRequest).where(
+                    LessonRequest.id.in_(lesson_request_ids)
+                )
+            ).scalars().all()
+            if lesson_request_ids
+            else []
+        )
         sl = ScheduledLesson(
             schedule_id=schedule.id,
             lesson_type=item["lesson_type"],
             lesson_request_id=item.get("lesson_request_id"),
-            group_lesson_id=item.get("group_lesson_id"),
             student_id=item.get("student_id"),
             day_of_week=item["day_of_week"],
             start_time=item["start_time"],
             end_time=item["end_time"],
             teacher_id=item["teacher_id"],
             room_id=item["room_id"],
+            participants=participants,
         )
         db.add(sl)
 

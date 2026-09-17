@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
-from app.models.entities import ScheduledLesson, Student
+from app.models.entities import LessonTypeEnum, ScheduledLesson, Student
 from app.services.pricing_service import calculate_lesson_price
 
 plt.rcParams["font.family"] = "DejaVu Sans"
@@ -34,7 +34,7 @@ def _load_lessons(db: Session, schedule_id: int) -> list[ScheduledLesson]:
             .options(
                 selectinload(ScheduledLesson.lesson_request),
                 selectinload(ScheduledLesson.student),
-                selectinload(ScheduledLesson.group_lesson),
+                selectinload(ScheduledLesson.participants),
                 selectinload(ScheduledLesson.teacher),
                 selectinload(ScheduledLesson.room),
             )
@@ -44,8 +44,6 @@ def _load_lessons(db: Session, schedule_id: int) -> list[ScheduledLesson]:
 
 
 def _lesson_title(sl: ScheduledLesson, db: Session) -> str:
-    if sl.group_lesson_id is not None and sl.group_lesson:
-        return sl.group_lesson.title
     if sl.lesson_request and sl.lesson_request.subject:
         return sl.lesson_request.subject.name
     return "Занятие"
@@ -58,18 +56,18 @@ def _lesson_type_ru(sl: ScheduledLesson) -> str:
 
 
 def _cost_str(sl: ScheduledLesson, db: Session) -> str:
-    if sl.group_lesson_id is not None and sl.group_lesson:
-        n = len(sl.group_lesson.participants)
-        price = calculate_lesson_price(
-            db, sl.group_lesson.subject_id, "group", n
-        )
-        return f"{price} ₽/чел · {int(price * n)} ₽"
+    if sl.lesson_type == LessonTypeEnum.group:
+        subject = sl.lesson_request.subject if sl.lesson_request else None
+        if subject:
+            n = max(len(sl.participants), 1)
+            price = calculate_lesson_price(db, subject.id, "group", n)
+            return f"{price} ₽/чел · {int(price * n)} ₽"
     if sl.lesson_request and sl.lesson_request.subject:
         price = calculate_lesson_price(
             db, sl.lesson_request.subject_id, "individual", 1
         )
         return f"{price} ₽"
-    return "" if sl.lesson_type == LessonTypeEnum.group else ""
+    return ""
 
 
 def _fmt(t: time) -> str:
@@ -247,8 +245,8 @@ def export_xlsx(db: Session, schedule_id: int) -> bytes:
                 f"{sl.teacher.last_name} {sl.teacher.first_name}".strip() if sl.teacher else "—",
                 sl.room.name if sl.room else "—",
             ]
-            if sl.group_lesson_id is not None and sl.group_lesson:
-                n = len(sl.group_lesson.participants)
+            if sl.lesson_type == LessonTypeEnum.group:
+                n = max(len(sl.participants), 1)
                 lines.append(f"{n} чел.")
             else:
                 lines.append(sl.student.full_name if sl.student else "")

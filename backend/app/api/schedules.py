@@ -1,13 +1,13 @@
 from datetime import date
-
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi.responses import JSONResponse
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
-from app.models.entities import ScheduledLesson, Schedule
+from app.models.entities import LessonRequest, ScheduledLesson, Schedule
 from app.schemas.schemas import (
     ConflictCheckRequest,
     ConflictCheckResponse,
@@ -19,7 +19,6 @@ from app.schemas.schemas import (
     ScheduleGenerateResponse,
     ScheduleList,
     ScheduleUpdate,
-    ScheduledLessonBase,
     ScheduledLessonCreate,
     ScheduledLessonDetail,
     ScheduledLessonUpdate,
@@ -28,6 +27,50 @@ from app.services.conflict_service import check_conflicts
 from app.services.schedule_service import generate_schedule
 
 router = APIRouter()
+
+_LESSON_OPTIONS = (
+    selectinload(ScheduledLesson.schedule),
+    selectinload(ScheduledLesson.lesson_request),
+    selectinload(ScheduledLesson.student),
+    selectinload(ScheduledLesson.teacher),
+    selectinload(ScheduledLesson.room),
+    selectinload(ScheduledLesson.participants).selectinload(LessonRequest.student),
+    selectinload(ScheduledLesson.participants).selectinload(LessonRequest.subject),
+)
+
+_LOAD_PARTICIPANT_OPTIONS = (
+    selectinload(LessonRequest.student),
+    selectinload(LessonRequest.subject),
+)
+
+
+def _resolve_participants(db: Session, lesson_request_ids: list[int]):
+    if not lesson_request_ids:
+        return []
+    return (
+        db.execute(
+            select(LessonRequest)
+            .options(*_LOAD_PARTICIPANT_OPTIONS)
+            .where(LessonRequest.id.in_(lesson_request_ids))
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _participant_student_ids(obj: ScheduledLesson) -> list[int]:
+    ids = [p.student_id for p in obj.participants if p.student_id is not None]
+    if obj.student_id is not None:
+        ids.append(obj.student_id)
+    return list(dict.fromkeys(ids))
+
+
+def _participant_subject_id(obj: ScheduledLesson) -> Optional[int]:
+    if obj.lesson_request and obj.lesson_request.subject_id:
+        return obj.lesson_request.subject_id
+    if obj.participants and obj.participants[0].subject_id:
+        return obj.participants[0].subject_id
+    return None
 
 
 @router.post("/generate", response_model=DataResponse[ScheduleGenerateResponse])
@@ -122,30 +165,16 @@ def create_scheduled_lesson(
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    obj = ScheduledLesson(**body.model_dump())
+    lesson_request_ids = list(body.lesson_request_ids)
+    if body.lesson_request_id is not None and body.lesson_request_id not in lesson_request_ids:
+        lesson_request_ids.append(body.lesson_request_id)
+
+    data = body.model_dump(exclude={"lesson_request_ids"})
+    obj = ScheduledLesson(**data)
     db.add(obj)
     db.flush()
 
-    student_ids: list[int] = []
-    subject_id = None
-    if obj.student_id is not None:
-        student_ids = [obj.student_id]
-    if obj.lesson_request_id is not None:
-        lr = obj.lesson_request
-        if lr:
-            subject_id = lr.subject_id
-    if obj.group_lesson_id is not None:
-        from app.models.entities import group_lesson_participants
-
-        rows = db.execute(
-            select(group_lesson_participants.c.student_id).where(
-                group_lesson_participants.c.group_lesson_id == obj.group_lesson_id
-            )
-        ).scalars().all()
-        student_ids = list(rows)
-        gl = obj.group_lesson
-        if gl:
-            subject_id = gl.subject_id
+    obj.participants = _resolve_participants(db, lesson_request_ids)
 
     conflicts = check_conflicts(
         db=db,
@@ -155,13 +184,11 @@ def create_scheduled_lesson(
         end_time=obj.end_time,
         teacher_id=obj.teacher_id,
         room_id=obj.room_id,
-        student_ids=student_ids,
+        student_ids=_participant_student_ids(obj),
         exclude_lesson_id=obj.id,
-        subject_id=subject_id,
+        subject_id=_participant_subject_id(obj),
     )
     if conflicts:
-        from fastapi.responses import JSONResponse
-
         db.rollback()
         return JSONResponse(
             status_code=409,
@@ -184,7 +211,6 @@ def list_scheduled_lessons(
     student_id: Optional[int] = Query(default=None),
     teacher_id: Optional[int] = Query(default=None),
     room_id: Optional[int] = Query(default=None),
-    group_lesson_id: Optional[int] = Query(default=None),
     day_of_week: Optional[int] = Query(default=None, ge=0, le=6),
     db: Session = Depends(get_db),
 ):
@@ -194,24 +220,22 @@ def list_scheduled_lessons(
 
     q = (
         select(ScheduledLesson)
-        .options(
-            selectinload(ScheduledLesson.schedule),
-            selectinload(ScheduledLesson.lesson_request),
-            selectinload(ScheduledLesson.student),
-            selectinload(ScheduledLesson.group_lesson),
-            selectinload(ScheduledLesson.teacher),
-            selectinload(ScheduledLesson.room),
-        )
+        .options(*_LESSON_OPTIONS)
         .where(ScheduledLesson.schedule_id == schedule_id)
     )
     if student_id is not None:
-        q = q.where(ScheduledLesson.student_id == student_id)
+        q = q.where(
+            or_(
+                ScheduledLesson.student_id == student_id,
+                ScheduledLesson.participants.any(
+                    LessonRequest.student_id == student_id
+                ),
+            )
+        )
     if teacher_id is not None:
         q = q.where(ScheduledLesson.teacher_id == teacher_id)
     if room_id is not None:
         q = q.where(ScheduledLesson.room_id == room_id)
-    if group_lesson_id is not None:
-        q = q.where(ScheduledLesson.group_lesson_id == group_lesson_id)
     if day_of_week is not None:
         q = q.where(ScheduledLesson.day_of_week == day_of_week)
 
@@ -232,14 +256,7 @@ def list_scheduled_lessons(
 def get_scheduled_lesson(lesson_id: int, db: Session = Depends(get_db)):
     q = (
         select(ScheduledLesson)
-        .options(
-            selectinload(ScheduledLesson.schedule),
-            selectinload(ScheduledLesson.lesson_request),
-            selectinload(ScheduledLesson.student),
-            selectinload(ScheduledLesson.group_lesson),
-            selectinload(ScheduledLesson.teacher),
-            selectinload(ScheduledLesson.room),
-        )
+        .options(*_LESSON_OPTIONS)
         .where(ScheduledLesson.id == lesson_id)
     )
     obj = db.execute(q).scalar_one_or_none()
@@ -262,28 +279,17 @@ def update_scheduled_lesson(
         raise HTTPException(status_code=404, detail="Scheduled lesson not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    lesson_request_ids = update_data.pop("lesson_request_ids", None)
     for field, value in update_data.items():
         setattr(obj, field, value)
 
+    if lesson_request_ids is not None:
+        ids = list(lesson_request_ids)
+        if body.lesson_request_id is not None and body.lesson_request_id not in ids:
+            ids.append(body.lesson_request_id)
+        obj.participants = _resolve_participants(db, ids)
+
     db.flush()
-
-    student_ids: list[int] = []
-    subject_id = None
-    if obj.lesson_request_id is not None and obj.lesson_request:
-        subject_id = obj.lesson_request.subject_id
-    if obj.group_lesson_id is not None and obj.group_lesson:
-        subject_id = obj.group_lesson.subject_id
-    if obj.student_id is not None:
-        student_ids = [obj.student_id]
-    if obj.group_lesson_id is not None:
-        from app.models.entities import group_lesson_participants
-
-        rows = db.execute(
-            select(group_lesson_participants.c.student_id).where(
-                group_lesson_participants.c.group_lesson_id == obj.group_lesson_id
-            )
-        ).scalars().all()
-        student_ids = list(rows)
 
     conflicts = check_conflicts(
         db=db,
@@ -293,13 +299,11 @@ def update_scheduled_lesson(
         end_time=obj.end_time,
         teacher_id=obj.teacher_id,
         room_id=obj.room_id,
-        student_ids=student_ids,
+        student_ids=_participant_student_ids(obj),
         exclude_lesson_id=obj.id,
-        subject_id=subject_id,
+        subject_id=_participant_subject_id(obj),
     )
     if conflicts:
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(
             status_code=409,
             content=ConflictCheckResponse(
@@ -308,7 +312,12 @@ def update_scheduled_lesson(
         )
 
     db.commit()
-    db.refresh(obj)
+    q = (
+        select(ScheduledLesson)
+        .options(*_LESSON_OPTIONS)
+        .where(ScheduledLesson.id == lesson_id)
+    )
+    obj = db.execute(q).scalar_one()
     return DataResponse(data=ScheduledLessonDetail.model_validate(obj))
 
 
@@ -337,29 +346,23 @@ def conflict_check(
     subject_id = None
     if body.student_id is not None:
         student_ids = [body.student_id]
-    if body.group_lesson_id is not None:
-        from sqlalchemy import select as sel
-        from app.models.entities import group_lesson_participants, GroupLesson
 
-        rows = db.execute(
-            sel(group_lesson_participants.c.student_id).where(
-                group_lesson_participants.c.group_lesson_id == body.group_lesson_id
+    request_ids = list(body.lesson_request_ids)
+    if body.student_id is None and request_ids:
+        lrs = _resolve_participants(db, request_ids)
+        student_ids = list(
+            dict.fromkeys(
+                lr.student_id for lr in lrs if lr.student_id is not None
             )
-        ).scalars().all()
-        student_ids = list(rows)
-        gl = db.get(GroupLesson, body.group_lesson_id)
-        if gl:
-            subject_id = gl.subject_id
+        )
+        if lrs and subject_id is None:
+            subject_id = lrs[0].subject_id
+    if subject_id is None and body.student_id is not None:
+        subject_id = None
     if body.exclude_lesson_id is not None:
         existing = db.get(ScheduledLesson, body.exclude_lesson_id)
-        if existing and existing.lesson_request_id:
-            subject_id = (
-                existing.lesson_request.subject_id
-                if existing.lesson_request
-                else None
-            )
-        if existing and existing.group_lesson_id and existing.group_lesson:
-            subject_id = existing.group_lesson.subject_id
+        if existing:
+            subject_id = _participant_subject_id(existing)
 
     conflicts = check_conflicts(
         db=db,

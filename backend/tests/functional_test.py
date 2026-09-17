@@ -37,9 +37,15 @@ def test_seed_and_list():
     r = client.get("/api/rooms")
     assert r.status_code == 200
     assert len(r.json()["items"]) == 5
-    r = client.get("/api/group-lessons")
-    assert r.status_code == 200
-    assert len(r.json()["items"]) == 6
+    r = client.get("/api/students")
+    students = r.json()["items"]
+    group_requests = sum(
+        1
+        for s in students
+        for lr in s.get("lesson_requests", [])
+        if lr.get("lesson_type") == "group"
+    )
+    assert group_requests == 13, f"expected 13 group requests, got {group_requests}"
     print("seed+list OK")
 
 
@@ -72,9 +78,8 @@ def test_conflict_freedom(sched_id):
         if l["lesson_type"] == "individual":
             by_student.setdefault((day, l["student_id"]), []).append((s, e))
         elif l["lesson_type"] == "group":
-            gl = client.get(f"/api/group-lessons/{l['group_lesson_id']}").json()["data"]
-            for p in gl["participants"]:
-                by_student.setdefault((day, p["id"]), []).append((s, e))
+            for p in l.get("participants", []):
+                by_student.setdefault((day, p["student"]["id"]), []).append((s, e))
 
     def overlaps(a, b):
         return a[0] < b[1] and b[0] < a[1]

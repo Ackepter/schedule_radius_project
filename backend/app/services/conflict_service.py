@@ -6,12 +6,11 @@ from sqlalchemy.orm import Session
 from app.models.entities import (
     Availability,
     EntityTypeEnum,
-    GroupLesson,
     Room,
     ScheduledLesson,
+    Student,
     Subject,
     Teacher,
-    group_lesson_participants,
 )
 from app.schemas.schemas import ConflictDetail, ConflictType
 
@@ -98,18 +97,15 @@ def check_conflicts(
         sl_student_ids: list[int] = []
         if sl.student_id is not None:
             sl_student_ids.append(sl.student_id)
-        if sl.group_lesson_id is not None:
-            sl_student_ids.extend(
-                db.execute(
-                    select(group_lesson_participants.c.student_id).where(
-                        group_lesson_participants.c.group_lesson_id
-                        == sl.group_lesson_id
-                    )
-                ).scalars()
-            )
+        # Участники группового занятия (по запросам в join-таблице)
+        sl_student_ids.extend(
+            p.student_id
+            for p in sl.participants
+            if p.student_id is not None
+        )
         for sid in student_ids:
             if sid in sl_student_ids:
-                st = db.get(__import__("app.models.entities", fromlist=["Student"]).Student, sid)
+                st = db.get(Student, sid)
                 conflicts.append(
                     ConflictDetail(
                         conflict_type=ConflictType.student_busy,

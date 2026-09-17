@@ -6,7 +6,6 @@ from app.models.entities import (
     Room,
     Availability,
     LessonRequest,
-    GroupLesson,
     Schedule,
     ScheduledLesson,
     Price,
@@ -16,7 +15,7 @@ from app.models.entities import (
     EntityTypeEnum,
     teacher_subjects,
     room_subjects,
-    group_lesson_participants,
+    scheduled_lesson_participants,
 )
 
 __all__ = [
@@ -27,7 +26,6 @@ __all__ = [
     "Room",
     "Availability",
     "LessonRequest",
-    "GroupLesson",
     "Schedule",
     "ScheduledLesson",
     "Price",
@@ -37,5 +35,5 @@ __all__ = [
     "EntityTypeEnum",
     "teacher_subjects",
     "room_subjects",
-    "group_lesson_participants",
+    "scheduled_lesson_participants",
 ]

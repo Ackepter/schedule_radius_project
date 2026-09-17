@@ -12,7 +12,6 @@ from app.core.config import get_settings
 from app.models.entities import (
     Availability,
     EntityTypeEnum,
-    GroupLesson,
     LessonRequest,
     LessonTypeEnum,
     OptimizerSettings,
@@ -20,10 +19,10 @@ from app.models.entities import (
     Student,
     Subject,
     Teacher,
-    group_lesson_participants,
     room_subjects,
     teacher_subjects,
 )
+from app.optimizer.grouping import FailedGroup, form_groups
 
 MINUTES_IN_DAY = 1440
 SCALE = 100  # масштаб весов целевой функции -> целые коэффициенты
@@ -83,7 +82,7 @@ class LessonOccurrence:
     title: str
     lesson_type: LessonTypeEnum
     lesson_request_id: Optional[int] = None
-    group_lesson_id: Optional[int] = None
+    lesson_request_ids: list[int] = field(default_factory=list)
     student_ids: list[int] = field(default_factory=list)
     subject_id: int = 0
     subject_name: str = ""
@@ -172,39 +171,15 @@ def load_availability(
 # ---------------------------------------------------------------------------
 
 
-def _load_occurrences(db: Session) -> list[LessonOccurrence]:
+def _load_occurrences(
+    db: Session,
+) -> tuple[list[LessonOccurrence], list[FailedGroup]]:
     occs: list[LessonOccurrence] = []
+    failed_groups: list[FailedGroup] = []
 
-    gl_rows = db.execute(
-        select(GroupLesson, Subject.name).join(Subject, GroupLesson.subject_id == Subject.id)
-    ).all()
-    for gl, subj_name in gl_rows:
-        student_ids = list(
-            db.execute(
-                select(group_lesson_participants.c.student_id).where(
-                    group_lesson_participants.c.group_lesson_id == gl.id
-                )
-            ).scalars()
-        )
-        if not student_ids:
-            continue
-        for w_occ in range(gl.lessons_per_week):
-            occs.append(
-                LessonOccurrence(
-                    id=f"gl_{gl.id}_{w_occ}",
-                    title=gl.title or subj_name,
-                    lesson_type=LessonTypeEnum.group,
-                    group_lesson_id=gl.id,
-                    student_ids=student_ids,
-                    subject_id=gl.subject_id,
-                    subject_name=subj_name,
-                    duration_minutes=gl.duration_minutes or 60,
-                    priority=3,
-                    preferred_teacher_id=gl.teacher_id,
-                    teacher_is_required=gl.teacher_is_required,
-                    notes=gl.comment,
-                )
-            )
+    subject_names: dict[int, str] = {}
+    for s in db.execute(select(Subject)).scalars():
+        subject_names[s.id] = s.name
 
     lr_rows = db.execute(
         select(LessonRequest, Subject.name)
@@ -222,6 +197,7 @@ def _load_occurrences(db: Session) -> list[LessonOccurrence]:
                     title=subj_name,
                     lesson_type=LessonTypeEnum.individual,
                     lesson_request_id=lr.id,
+                    lesson_request_ids=[lr.id],
                     student_ids=[lr.student_id],
                     subject_id=lr.subject_id,
                     subject_name=subj_name,
@@ -232,7 +208,45 @@ def _load_occurrences(db: Session) -> list[LessonOccurrence]:
                     notes=lr.notes,
                 )
             )
-    return occs
+
+    opt_settings = db.scalars(select(OptimizerSettings).limit(1)).first()
+    if opt_settings is None:
+        opt_settings = OptimizerSettings()
+        db.add(opt_settings)
+        db.flush()
+
+    group_reqs = db.execute(
+        select(LessonRequest)
+        .where(LessonRequest.lesson_type == LessonTypeEnum.group)
+    ).scalars().all()
+    formed, failed_groups = form_groups(
+        db,
+        list(group_reqs),
+        min_size=opt_settings.group_min_size or 2,
+        max_size=opt_settings.group_max_size or 8,
+        subject_names=subject_names,
+    )
+    for g in formed:
+        anchor = g.lesson_request_ids[0]
+        for o in range(g.lessons_per_week):
+            occs.append(
+                LessonOccurrence(
+                    id=f"gp_{'_'.join(str(i) for i in g.lesson_request_ids)}_{o}",
+                    title=g.subject_name,
+                    lesson_type=LessonTypeEnum.group,
+                    lesson_request_id=anchor,
+                    lesson_request_ids=list(g.lesson_request_ids),
+                    student_ids=list(g.student_ids),
+                    subject_id=g.subject_id,
+                    subject_name=g.subject_name,
+                    duration_minutes=g.duration_minutes,
+                    priority=g.priority,
+                    preferred_teacher_id=g.preferred_teacher_id,
+                    teacher_is_required=g.teacher_is_required,
+                )
+            )
+
+    return occs, failed_groups
 
 
 def _teachers_for_subject(db: Session, subject_id: int) -> set[int]:
@@ -618,7 +632,7 @@ def build_and_solve(
             {
                 "lesson_type": occ.lesson_type.value,
                 "lesson_request_id": occ.lesson_request_id,
-                "group_lesson_id": occ.group_lesson_id,
+                "lesson_request_ids": list(occ.lesson_request_ids),
                 "student_id": occ.student_ids[0] if occ.student_ids else None,
                 "students": occ.student_ids,
                 "day_of_week": d,
@@ -709,11 +723,11 @@ def _diagnose(
 
 def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -> ScheduleResult:
     """Полный цикл: загрузка данных и оптимизация с проверкой результата."""
-    occurrences = _load_occurrences(db)
-    if not occurrences:
+    occurrences, failed_groups = _load_occurrences(db)
+    if not occurrences and not failed_groups:
         return ScheduleResult(
             success=False,
-            message="Нет занятий для составления расписания. Добавьте индивидуальные требования учеников (активные, с типом 'individual') или групповые занятия с участниками."
+            message="Нет занятий для составления расписания. Добавьте активные требования учеников с типом 'individual' или 'group'."
         )
 
     opt_settings = db.scalars(select(OptimizerSettings).limit(1)).first()
@@ -726,6 +740,17 @@ def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -
     result = build_and_solve(db, occurrences, opt_settings)
     if not result.success:
         return result
+
+    for fg in failed_groups:
+        result.unscheduled.insert(
+            0,
+            UnscheduledInfo(
+                identifier=f"gr_{fg.lesson_request_id}",
+                name=fg.subject_name,
+                reason=fg.reason,
+                suggestions=["Добавить ещё одного ребёнка на это направление"],
+            ),
+        )
 
     # самопроверка: никакие назначения не должны пересекаться
     conflicts = _pairwise_conflicts(result.scheduled)

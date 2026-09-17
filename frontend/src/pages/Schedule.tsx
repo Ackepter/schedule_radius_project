@@ -329,14 +329,15 @@ export default function Schedule() {
   }
   const getSubjectFromLesson = (lesson: ScheduledLessonDetail) => {
     if (lesson.lesson_request?.subject) return lesson.lesson_request.subject.name
-    if (lesson.group_lesson?.subject) return lesson.group_lesson.subject.name
+    const first = lesson.participants?.[0]
+    if (first?.subject) return first.subject.name
     return '—'
   }
   const getParticipantsNames = (lesson: ScheduledLessonDetail) => {
-    if (lesson.group_lesson?.participants) {
-      return lesson.group_lesson.participants.map((p) => `${p.last_name} ${p.first_name}`).join(', ')
-    }
-    return ''
+    return (lesson.participants ?? [])
+      .map((p) => (p.student ? `${p.student.last_name} ${p.student.first_name}` : ''))
+      .filter(Boolean)
+      .join(', ')
   }
   const openDetailDialog = (lesson: ScheduledLessonDetail) => {
     setDetailLesson(lesson)
@@ -344,7 +345,8 @@ export default function Schedule() {
   }
   const formatMoney = (v: number) => `${v.toLocaleString('ru-RU')} ₽`
   const getLessonPrice = (lesson: ScheduledLessonDetail) => {
-    const subjectId = lesson.lesson_request?.subject_id ?? lesson.group_lesson?.subject_id ?? null
+    const subjectId =
+      lesson.lesson_request?.subject_id ?? lesson.participants?.[0]?.subject?.id ?? null
     if (subjectId === null) return null
     const candidates = prices.filter(
       (p) => p.subject_id === subjectId && p.lesson_type === lesson.lesson_type,
@@ -353,7 +355,7 @@ export default function Schedule() {
       const p = candidates.find((c) => c.min_participants <= 1 && c.max_participants >= 1) ?? candidates[0]
       return p ? { perStudent: p.price_per_student, count: 1, total: p.price_per_student } : null
     }
-    const count = lesson.group_lesson?.participants?.length ?? 0
+    const count = lesson.participants?.length ?? 0
     const p = candidates.find((c) => count >= c.min_participants && count <= c.max_participants) ?? candidates[0]
     return p ? { perStudent: p.price_per_student, count, total: p.price_per_student * count } : null
   }
@@ -563,7 +565,7 @@ export default function Schedule() {
                           {getStudentName(lesson.student_id)}
                         </Typography>
                       )}
-                      {lesson.group_lesson && height > 80 && (
+                      {lesson.lesson_type === 'group' && height > 80 && getParticipantsNames(lesson) && (
                         <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.3, fontSize: 11, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {getParticipantsNames(lesson)}
                         </Typography>
@@ -582,7 +584,7 @@ export default function Schedule() {
           <>
             <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', pb: 1 }}>
               <Chip
-                label={detailLesson.lesson_type === 'individual' ? 'Индивидуальное' : `Групповое${detailLesson.group_lesson?.participants?.length ? ` · ${detailLesson.group_lesson.participants.length} чел.` : ''}`}
+                label={detailLesson.lesson_type === 'individual' ? 'Индивидуальное' : `Групповое${detailLesson.participants?.length ? ` · ${detailLesson.participants.length} чел.` : ''}`}
                 color={detailLesson.lesson_type === 'individual' ? 'primary' : 'secondary'}
                 size="small"
               />
@@ -618,15 +620,23 @@ export default function Schedule() {
                   </Typography>
                 </Box>
               )}
-              {detailLesson.lesson_type === 'group' && detailLesson.group_lesson && (
+              {detailLesson.lesson_type === 'group' && (detailLesson.participants?.length ?? 0) > 0 && (
                 <Box>
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
                     <GroupsIcon fontSize="small" color="action" />
-                    <Typography>Участники ({detailLesson.group_lesson.participants.length}):</Typography>
+                    <Typography>Участники ({detailLesson.participants.length}):</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                    {detailLesson.group_lesson.participants.map((p) => (
-                      <Chip key={p.id} size="small" label={`${p.last_name} ${p.first_name}`} />
+                    {detailLesson.participants.map((p) => (
+                      <Chip
+                        key={p.lesson_request_id}
+                        size="small"
+                        label={
+                          p.student
+                            ? `${p.student.last_name} ${p.student.first_name}`
+                            : `Ученик (заявка #${p.lesson_request_id})`
+                        }
+                      />
                     ))}
                   </Box>
                 </Box>
@@ -644,9 +654,9 @@ export default function Schedule() {
                   </Box>
                 )
               })()}
-              {detailLesson.group_lesson?.comment && (
+              {detailLesson.lesson_request?.notes && (
                 <Typography variant="body2" color="text.secondary">
-                  Комментарий: {detailLesson.group_lesson.comment}
+                  Комментарий: {detailLesson.lesson_request.notes}
                 </Typography>
               )}
             </DialogContent>

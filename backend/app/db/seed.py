@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.models.entities import (
     Availability,
     EntityTypeEnum,
-    GroupLesson,
     LessonRequest,
     LessonTypeEnum,
     OptimizerSettings,
@@ -176,23 +175,33 @@ def seed_database(db: Session) -> dict:
 
     db.flush()
 
-    # Групповые занятия (5-10)
-    group_specs = [
-        ("Математика 5 класс", subjects["math"], teachers[0], 60, [students[0], students[1], students[2]], 6, False),
-        ("Английский А2", subjects["eng"], teachers[1], 45, [students[3], students[4], students[5], students[6]], 6, False),
-        ("Питон для детей", subjects["prog"], teachers[4], 60, [students[8], students[9], students[4]], 6, False),
-        ("Робототехника продвинутые", subjects["robots"], teachers[2], 90, [students[2], students[4], students[6]], 8, False),
-        ("Математика 6 класс", subjects["math"], teachers[0], 60, [students[7], students[8], students[9], students[1]], 6, False),
-        ("Рисование скетчинг", subjects["art"], teachers[1], 90, [students[0], students[3], students[9]], 8, False),
+    # Групповые требования (группы формируются автоматически из общих слотов)
+    group_requests = [
+        (students[0], subjects["math"], 1, 60, None, False),
+        (students[1], subjects["math"], 1, 60, None, False),
+        (students[2], subjects["math"], 1, 60, None, False),
+        (students[2], subjects["robots"], 1, 90, None, False),
+        (students[6], subjects["robots"], 1, 90, None, False),
+        (students[0], subjects["art"], 1, 90, None, False),
+        (students[1], subjects["art"], 1, 90, None, False),
+        (students[3], subjects["eng"], 1, 45, None, False),
+        (students[5], subjects["eng"], 1, 45, None, False),
+        (students[6], subjects["eng"], 1, 45, None, False),
+        (students[4], subjects["prog"], 1, 60, None, False),
+        (students[8], subjects["prog"], 1, 60, None, False),
+        (students[9], subjects["prog"], 1, 60, None, False),
     ]
-    for title, subj, t, dur, participants, max_size, req in group_specs:
-        gl = GroupLesson(
-            title=title, subject_id=subj.id, teacher_id=(t.id if t else None),
-            teacher_is_required=req, duration_minutes=dur, max_size=max_size,
-            lessons_per_week=1, comment="Постоянная группа",
+    for st, subj, n, dur, pref, req in group_requests:
+        db.add(
+            LessonRequest(
+                student_id=st.id, subject_id=subj.id,
+                lesson_type=LessonTypeEnum.group,
+                lessons_per_week=n, duration_minutes=dur,
+                preferred_teacher_id=(pref.id if pref else None),
+                teacher_is_required=req, priority=1,
+                notes="Групповое занятие. Группа формируется автоматически",
+            )
         )
-        gl.participants = participants
-        db.add(gl)
 
     db.flush()
 
@@ -210,6 +219,8 @@ def seed_database(db: Session) -> dict:
     opt.late_hour = 20
     opt.weight_teacher_balance = 30.0
     opt.weight_room_balance = 10.0
+    opt.group_min_size = 2
+    opt.group_max_size = 8
     db.commit()
 
     return {
@@ -218,6 +229,5 @@ def seed_database(db: Session) -> dict:
         "rooms": len(rooms),
         "students": len(students),
         "parents": len(parents),
-        "group_lessons": len(group_specs),
-        "lesson_requests": len([r for r in requests if r]),
+        "lesson_requests": len(requests) + len(group_requests),
     }

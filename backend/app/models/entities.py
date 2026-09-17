@@ -40,19 +40,19 @@ room_subjects = Table(
     Column("subject_id", Integer, ForeignKey("subjects.id", ondelete="CASCADE"), primary_key=True),
 )
 
-group_lesson_participants = Table(
-    "group_lesson_participants",
+scheduled_lesson_participants = Table(
+    "scheduled_lesson_participants",
     Base.metadata,
     Column(
-        "group_lesson_id",
+        "scheduled_lesson_id",
         Integer,
-        ForeignKey("group_lessons.id", ondelete="CASCADE"),
+        ForeignKey("scheduled_lessons.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
-        "student_id",
+        "lesson_request_id",
         Integer,
-        ForeignKey("students.id", ondelete="CASCADE"),
+        ForeignKey("lesson_requests.id", ondelete="CASCADE"),
         primary_key=True,
     ),
 )
@@ -75,7 +75,6 @@ class EntityTypeEnum(str, enum.Enum):
     teacher = "teacher"
     room = "room"
     lesson_request = "lesson_request"
-    group_lesson = "group_lesson"
 
 
 # ---------- Models ----------
@@ -111,9 +110,6 @@ class Student(Base, TimestampMixin):
     parent: Mapped[Optional["Parent"]] = relationship("Parent", back_populates="students")
     lesson_requests: Mapped[list["LessonRequest"]] = relationship(
         "LessonRequest", back_populates="student", cascade="all, delete-orphan"
-    )
-    group_lessons: Mapped[list["GroupLesson"]] = relationship(
-        "GroupLesson", secondary=group_lesson_participants, back_populates="participants"
     )
 
 
@@ -194,28 +190,15 @@ class LessonRequest(Base, TimestampMixin):
     student: Mapped["Student"] = relationship("Student", back_populates="lesson_requests")
     subject: Mapped["Subject"] = relationship("Subject")
     preferred_teacher: Mapped[Optional["Teacher"]] = relationship("Teacher")
-
-
-class GroupLesson(Base, TimestampMixin):
-    __tablename__ = "group_lessons"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    title = Column(String(300), nullable=False)
-    subject_id = Column(
-        Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False
+    scheduled_lessons: Mapped[list["ScheduledLesson"]] = relationship(
+        "ScheduledLesson",
+        secondary=scheduled_lesson_participants,
+        back_populates="participants",
     )
-    teacher_id = Column(Integer, ForeignKey("teachers.id", ondelete="SET NULL"))
-    teacher_is_required = Column(Boolean, default=False, nullable=False)
-    duration_minutes = Column(Integer, default=60, nullable=False)
-    lessons_per_week = Column(Integer, default=1, nullable=False)
-    max_size = Column(Integer, default=6, nullable=False)
-    comment = Column(Text)
 
-    subject: Mapped["Subject"] = relationship("Subject")
-    teacher: Mapped[Optional["Teacher"]] = relationship("Teacher")
-    participants: Mapped[list["Student"]] = relationship(
-        "Student", secondary=group_lesson_participants, back_populates="group_lessons"
-    )
+    @property
+    def lesson_request_id(self) -> int:
+        return self.id
 
 
 class Schedule(Base, TimestampMixin):
@@ -249,9 +232,6 @@ class ScheduledLesson(Base, TimestampMixin):
         Integer, ForeignKey("lesson_requests.id", ondelete="SET NULL")
     )
     student_id = Column(Integer, ForeignKey("students.id", ondelete="SET NULL"))
-    group_lesson_id = Column(
-        Integer, ForeignKey("group_lessons.id", ondelete="SET NULL")
-    )
     day_of_week = Column(Integer, nullable=False)
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
@@ -265,9 +245,17 @@ class ScheduledLesson(Base, TimestampMixin):
     schedule: Mapped["Schedule"] = relationship("Schedule", back_populates="lessons")
     lesson_request: Mapped[Optional["LessonRequest"]] = relationship("LessonRequest")
     student: Mapped[Optional["Student"]] = relationship("Student")
-    group_lesson: Mapped[Optional["GroupLesson"]] = relationship("GroupLesson")
+    participants: Mapped[list["LessonRequest"]] = relationship(
+        "LessonRequest",
+        secondary=scheduled_lesson_participants,
+        back_populates="scheduled_lessons",
+    )
     teacher: Mapped["Teacher"] = relationship("Teacher")
     room: Mapped["Room"] = relationship("Room")
+
+    @property
+    def lesson_request_ids(self) -> list[int]:
+        return [p.id for p in self.participants]
 
 
 class Price(Base):
@@ -298,3 +286,5 @@ class OptimizerSettings(Base):
     late_hour = Column(Integer, default=20, nullable=False)
     weight_teacher_balance = Column(Float, default=30.0, nullable=False)
     weight_room_balance = Column(Float, default=10.0, nullable=False)
+    group_min_size = Column(Integer, default=2, nullable=False)
+    group_max_size = Column(Integer, default=8, nullable=False)

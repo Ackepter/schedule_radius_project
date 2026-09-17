@@ -15,7 +15,6 @@ export const EntityTypeEnum = {
   teacher: 'teacher',
   room: 'room',
   lesson_request: 'lesson_request',
-  group_lesson: 'group_lesson',
 } as const
 export type EntityType = (typeof EntityTypeEnum)[keyof typeof EntityTypeEnum]
 
@@ -129,21 +128,6 @@ export interface LessonRequestList extends LessonRequestBase {
   student?: StudentBase | null
 }
 
-export interface GroupLesson {
-  id: number
-  title: string
-  subject_id: number
-  teacher_id?: number | null
-  teacher_is_required: boolean
-  duration_minutes: number
-  lessons_per_week: number
-  max_size: number
-  comment?: string | null
-  subject?: Subject | null
-  teacher?: Teacher | null
-  participants: StudentBase[]
-}
-
 export interface Price {
   id: number
   subject_id: number
@@ -168,7 +152,7 @@ export interface ScheduledLessonBase {
   lesson_type: LessonType
   lesson_request_id?: number | null
   student_id?: number | null
-  group_lesson_id?: number | null
+  lesson_request_ids: number[]
   day_of_week: number
   start_time: string
   end_time: string
@@ -176,11 +160,17 @@ export interface ScheduledLessonBase {
   room_id: number
 }
 
+export interface ScheduledLessonParticipant {
+  lesson_request_id: number
+  student?: StudentBase | null
+  subject?: Subject | null
+}
+
 export interface ScheduledLessonDetail extends ScheduledLessonBase {
   schedule?: ScheduleBase | null
   lesson_request?: LessonRequestBase | null
   student?: StudentBase | null
-  group_lesson?: GroupLesson | null
+  participants: ScheduledLessonParticipant[]
   teacher?: Teacher | null
   room?: Room | null
 }
@@ -200,6 +190,8 @@ export interface OptimizerSettings {
   late_hour: number
   weight_teacher_balance: number
   weight_room_balance: number
+  group_min_size: number
+  group_max_size: number
 }
 
 export interface ScheduleGenerateResponse {

@@ -5,7 +5,6 @@ from app.api import (
     dev,
     export,
     finance,
-    group_lessons,
     lesson_requests,
     optimizer_settings,
     parents,
@@ -29,11 +28,6 @@ api_router.include_router(
     lesson_requests.router,
     prefix="/lesson-requests",
     tags=["lesson-requests"],
-)
-api_router.include_router(
-    group_lessons.router,
-    prefix="/group-lessons",
-    tags=["group-lessons"],
 )
 api_router.include_router(prices.router, prefix="/prices", tags=["prices"])
 api_router.include_router(

@@ -16,7 +16,6 @@ import SchoolIcon from '@mui/icons-material/School'
 import PersonIcon from '@mui/icons-material/Person'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom'
-import GroupsIcon from '@mui/icons-material/Groups'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance'
 import DeveloperModeIcon from '@mui/icons-material/DeveloperMode'
@@ -25,7 +24,6 @@ import Students from './pages/Students'
 import Teachers from './pages/Teachers'
 import Subjects from './pages/Subjects'
 import Rooms from './pages/Rooms'
-import GroupLessons from './pages/GroupLessons'
 import Schedule from './pages/Schedule'
 import Finance from './pages/Finance'
 import Developer from './pages/Developer'
@@ -38,7 +36,6 @@ const MAIN_NAV_ITEMS = [
   { label: 'Педагоги', path: '/teachers', icon: <PersonIcon /> },
   { label: 'Направления', path: '/subjects', icon: <MenuBookIcon /> },
   { label: 'Кабинеты', path: '/rooms', icon: <MeetingRoomIcon /> },
-  { label: 'Групповые занятия', path: '/groups', icon: <GroupsIcon /> },
   { label: 'Расписание', path: '/schedule', icon: <CalendarMonthIcon /> },
   { label: 'Финансы', path: '/finance', icon: <AccountBalanceIcon /> },
 ]
@@ -108,7 +105,6 @@ export default function App() {
           <Route path="/teachers" element={<Teachers />} />
           <Route path="/subjects" element={<Subjects />} />
           <Route path="/rooms" element={<Rooms />} />
-          <Route path="/groups" element={<GroupLessons />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/finance" element={<Finance />} />
           <Route path="/developer" element={<Developer />} />

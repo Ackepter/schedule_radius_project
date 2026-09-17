@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.entities import (
     Availability,
     EntityTypeEnum,
-    GroupLesson,
     LessonRequest,
     LessonTypeEnum,
     OptimizerSettings,
@@ -28,9 +27,8 @@ from app.models.entities import (
 )
 
 WIPE_TABLES = (
-    "scheduled_lessons, schedules, lesson_requests, availabilities, prices, "
-    "group_lesson_participants, group_lessons, students, teachers, rooms, "
-    "subjects, parents"
+    "scheduled_lesson_participants, scheduled_lessons, schedules, lesson_requests, "
+    "availabilities, prices, students, teachers, rooms, subjects, parents"
 )
 
 TIME_FMT = "%H:%M"
@@ -106,17 +104,17 @@ def wipe_all_data(db: Session) -> None:
     if dialect == "postgresql":
         db.execute(text(f"TRUNCATE TABLE {WIPE_TABLES} RESTART IDENTITY CASCADE"))
     else:
-        db.query(ScheduledLesson).delete()
-        db.query(Schedule).delete()
-        db.query(GroupLesson).delete()
-        db.query(LessonRequest).delete()
-        db.query(Availability).delete()
-        db.query(Price).delete()
-        db.query(Student).delete()
-        db.query(Teacher).delete()
-        db.query(Room).delete()
-        db.query(Subject).delete()
-        db.query(Parent).delete()
+        db.execute(text("DELETE FROM scheduled_lesson_participants"))
+        db.execute(text("DELETE FROM scheduled_lessons"))
+        db.execute(text("DELETE FROM schedules"))
+        db.execute(text("DELETE FROM lesson_requests"))
+        db.execute(text("DELETE FROM availabilities"))
+        db.execute(text("DELETE FROM prices"))
+        db.execute(text("DELETE FROM students"))
+        db.execute(text("DELETE FROM teachers"))
+        db.execute(text("DELETE FROM rooms"))
+        db.execute(text("DELETE FROM subjects"))
+        db.execute(text("DELETE FROM parents"))
     db.flush()
 
 
@@ -171,15 +169,6 @@ def export_all(db: Session) -> dict:
         )
         .order_by(LessonRequest.id)
     ).all()
-    groups = db.scalars(
-        select(GroupLesson)
-        .options(
-            selectinload(GroupLesson.subject),
-            selectinload(GroupLesson.teacher),
-            selectinload(GroupLesson.participants),
-        )
-        .order_by(GroupLesson.id)
-    ).all()
     prices = db.scalars(
         select(Price).options(selectinload(Price.subject)).order_by(Price.id)
     ).all()
@@ -190,7 +179,7 @@ def export_all(db: Session) -> dict:
         select(ScheduledLesson)
         .options(
             selectinload(ScheduledLesson.lesson_request).selectinload(LessonRequest.subject),
-            selectinload(ScheduledLesson.group_lesson),
+            selectinload(ScheduledLesson.participants).selectinload(LessonRequest.student),
             selectinload(ScheduledLesson.student),
             selectinload(ScheduledLesson.teacher),
             selectinload(ScheduledLesson.room),
@@ -304,22 +293,6 @@ def export_all(db: Session) -> dict:
             }
             for s in students
         ],
-        "group_lessons": [
-            {
-                "title": g.title,
-                "subject": subject_names.get(g.subject_id),
-                "teacher": (teacher_names.get(g.teacher_id) if g.teacher_id else None),
-                "teacher_is_required": g.teacher_is_required,
-                "duration_minutes": g.duration_minutes,
-                "lessons_per_week": g.lessons_per_week,
-                "max_size": g.max_size,
-                "comment": g.comment,
-                "students": [
-                    full_name(p.first_name, p.last_name) for p in g.participants
-                ],
-            }
-            for g in groups
-        ],
         "prices": [
             {
                 "subject": subject_names.get(p.subject_id),
@@ -341,6 +314,8 @@ def export_all(db: Session) -> dict:
                 "late_hour": settings[0].late_hour,
                 "weight_teacher_balance": settings[0].weight_teacher_balance,
                 "weight_room_balance": settings[0].weight_room_balance,
+                "group_min_size": settings[0].group_min_size,
+                "group_max_size": settings[0].group_max_size,
             }
             if settings
             else {}
@@ -364,7 +339,15 @@ def export_all(db: Session) -> dict:
                             if l.lesson_request
                             else None
                         ),
-                        "group": l.group_lesson.title if l.group_lesson else None,
+                        "participants": [
+                            (
+                                f"{p.student.last_name} {p.student.first_name}".strip()
+                                if p.student
+                                else ""
+                            )
+                            for p in l.participants
+                            if p.student
+                        ],
                         "day_of_week": l.day_of_week,
                         "start_time": _fmt_time(l.start_time),
                         "end_time": _fmt_time(l.end_time),
@@ -482,8 +465,8 @@ def import_all(db: Session, payload: dict) -> dict:
 
     # 5. Ученики и их требования
     student_map: dict[str, Student] = {}
-    # (student_id, subject_id) -> id индивидуального требования
-    request_lookup: dict[tuple[int, int], int] = {}
+    # (student_id, subject_id, lesson_type) -> id требования
+    request_lookup: dict[tuple[int, int, LessonTypeEnum | str], int] = {}
     for st in payload.get("students", []) or []:
         first = str(st.get("first_name") or "").strip()
         last = str(st.get("last_name") or "").strip()
@@ -531,43 +514,11 @@ def import_all(db: Session, payload: dict) -> dict:
             )
             db.add(req)
             db.flush()
-            if req.lesson_type == LessonTypeEnum.individual:
-                request_lookup.setdefault((req.student_id, req.subject_id), req.id)
+            request_lookup.setdefault(
+                (req.student_id, req.subject_id, req.lesson_type), req.id
+            )
 
-    # 6. Групповые занятия
-    group_map: dict[str, GroupLesson] = {}
-    for g in payload.get("group_lessons", []) or []:
-        title = str(g.get("title") or "").strip()
-        if not title:
-            continue
-        subj_name = str(g.get("subject") or "").strip()
-        subj = subject_map.get(subj_name) if subj_name else None
-        if subj is None:
-            warnings.append(f"Группа {title}: направление «{subj_name}» не найдено — группа пропущена")
-            continue
-        teacher_name = g.get("teacher")
-        teacher_obj = teacher_map.get(str(teacher_name).strip()) if teacher_name else None
-        obj = GroupLesson(
-            title=title,
-            subject_id=subj.id,
-            teacher_id=teacher_obj.id if teacher_obj else None,
-            teacher_is_required=bool(g.get("teacher_is_required") or False),
-            duration_minutes=int(g.get("duration_minutes") or 60),
-            lessons_per_week=int(g.get("lessons_per_week") or 1),
-            max_size=int(g.get("max_size") or 6),
-            comment=g.get("comment"),
-        )
-        db.add(obj)
-        db.flush()
-        for sname in g.get("students", []) or []:
-            student = student_map.get(str(sname).strip())
-            if student is not None and student not in obj.participants:
-                obj.participants.append(student)
-            else:
-                warnings.append(f"Группа {title}: ученик «{sname}» не найден")
-        group_map[title] = obj
-
-    # 7. Цены
+    # 6. Цены
     for p in payload.get("prices", []) or []:
         subj_name = str(p.get("subject") or "").strip()
         subj = subject_map.get(subj_name) if subj_name else None
@@ -602,6 +553,8 @@ def import_all(db: Session, payload: dict) -> dict:
         "late_hour",
         "weight_teacher_balance",
         "weight_room_balance",
+        "group_min_size",
+        "group_max_size",
     ):
         if field in oset and oset[field] is not None:
             setattr(opt, field, oset[field])
@@ -622,14 +575,6 @@ def import_all(db: Session, payload: dict) -> dict:
         db.flush()
         for ls in sch.get("lessons", []) or []:
             lesson_type = _parse_lesson_type(ls.get("lesson_type"))
-            student_name = ls.get("student")
-            student_obj = (
-                student_map.get(str(student_name).strip())
-                if student_name
-                else None
-            )
-            group_name = ls.get("group")
-            group_obj = group_map.get(str(group_name).strip()) if group_name else None
             teacher_name = ls.get("teacher")
             teacher_obj = teacher_map.get(str(teacher_name).strip()) if teacher_name else None
             room_name = ls.get("room")
@@ -641,25 +586,41 @@ def import_all(db: Session, payload: dict) -> dict:
                 continue
             subject_name = ls.get("subject")
             subject_obj = subject_map.get(str(subject_name).strip()) if subject_name else None
-            lesson_request_id = None
-            if student_obj is not None and subject_obj is not None:
-                lesson_request_id = request_lookup.get((student_obj.id, subject_obj.id))
+            participant_names = ls.get("participants") or []
+            if not participant_names and ls.get("student"):
+                participant_names = [ls.get("student")]
+            participant_requests: list[LessonRequest] = []
+            for pname in participant_names:
+                st_obj = student_map.get(str(pname).strip())
+                if st_obj is None or subject_obj is None:
+                    continue
+                req_id = request_lookup.get((st_obj.id, subject_obj.id, lesson_type))
+                if req_id is not None:
+                    req = db.get(LessonRequest, req_id)
+                    if req is not None:
+                        participant_requests.append(req)
+            anchor = participant_requests[0] if participant_requests else None
+            anchor_student_id = None
+            if anchor is not None:
+                anchor_student_id = anchor.student_id
+            else:
+                student_name = ls.get("student")
+                st_obj = (
+                    student_map.get(str(student_name).strip()) if student_name else None
+                )
+                anchor_student_id = st_obj.id if st_obj else None
             db.add(
                 ScheduledLesson(
                     schedule_id=sched.id,
                     lesson_type=lesson_type,
-                    lesson_request_id=lesson_request_id or None,
-                    student_id=(
-                        student_obj.id
-                        if student_obj is not None and lesson_type == LessonTypeEnum.individual
-                        else None
-                    ),
-                    group_lesson_id=group_obj.id if group_obj is not None else None,
+                    lesson_request_id=anchor.id if anchor else None,
+                    student_id=anchor_student_id,
                     day_of_week=int(ls.get("day_of_week") or 0),
                     start_time=_parse_time(ls.get("start_time")) or time(9),
                     end_time=_parse_time(ls.get("end_time")) or time(10),
                     teacher_id=teacher_obj.id,
                     room_id=room_obj.id,
+                    participants=participant_requests,
                 )
             )
 
@@ -670,7 +631,6 @@ def import_all(db: Session, payload: dict) -> dict:
         "rooms": len(room_map),
         "parents": len(parent_map),
         "students": len(student_map),
-        "group_lessons": len(group_map),
         "prices": len(payload.get("prices", []) or []),
         "schedules": len(payload.get("schedules", []) or []),
         "warnings": warnings,

@@ -4,6 +4,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import (
+    LessonRequest,
     LessonTypeEnum,
     Price,
     ScheduledLesson,
@@ -52,7 +53,7 @@ def calculate_schedule_revenue(
         .options(
             selectinload(ScheduledLesson.lesson_request),
             selectinload(ScheduledLesson.student),
-            selectinload(ScheduledLesson.group_lesson),
+            selectinload(ScheduledLesson.participants),
         )
         .where(ScheduledLesson.schedule_id == schedule_id)
     ).scalars().all()
@@ -73,8 +74,6 @@ def calculate_schedule_revenue(
         subject_name = "Unknown"
         if sl.lesson_request is not None:
             subject_id = sl.lesson_request.subject_id
-        elif sl.group_lesson is not None:
-            subject_id = sl.group_lesson.subject_id
 
         if subject_id is not None:
             subj = db.get(Subject, subject_id)
@@ -82,16 +81,8 @@ def calculate_schedule_revenue(
                 subject_name = subj.name
 
         participant_count = 1
-        if sl.lesson_type == LessonTypeEnum.group and sl.group_lesson_id is not None:
-            from app.models.entities import group_lesson_participants
-
-            rows = db.execute(
-                select(group_lesson_participants.c.student_id).where(
-                    group_lesson_participants.c.group_lesson_id
-                    == sl.group_lesson_id
-                )
-            ).scalars().all()
-            participant_count = max(len(rows), 1)
+        if sl.lesson_type == LessonTypeEnum.group:
+            participant_count = max(len(sl.participants), 1)
         elif sl.student_id is not None:
             participant_count = 1
 
