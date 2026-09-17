@@ -720,3 +720,49 @@ def test_finance_missing_rate_warning(fresh_db):
     f = calculate_schedule_revenue(db, sched_id)
     assert f.total_lessons >= 1
     assert any("не задана ставка" in w for w in f.warnings)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Тест 22 — индивидуальное занятие строго на 1 участника
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_price_individual_single_participant():
+    from pydantic import ValidationError
+
+    from app.schemas.schemas import PriceCreate, PriceUpdate
+
+    ok = PriceCreate(
+        subject_id=1,
+        lesson_type=LessonTypeEnum.individual,
+        min_participants=1,
+        max_participants=1,
+        price_per_student=500,
+    )
+    assert ok.max_participants == 1
+
+    for bad in (
+        dict(min_participants=1, max_participants=5),
+        dict(min_participants=2, max_participants=2),
+        dict(min_participants=3, max_participants=4),
+    ):
+        with pytest.raises(ValidationError):
+            PriceCreate(
+                subject_id=1,
+                lesson_type=LessonTypeEnum.individual,
+                **bad,
+                price_per_student=500,
+            )
+
+    # время обновления: перевод existing-тарифа в индивидуальный с max>1 отклоняется
+    with pytest.raises(ValidationError):
+        PriceUpdate(lesson_type=LessonTypeEnum.individual, max_participants=3)
+
+    # групповые тарифы не затронуты
+    grp = PriceCreate(
+        subject_id=1,
+        lesson_type=LessonTypeEnum.group,
+        min_participants=2,
+        max_participants=8,
+        price_per_student=600,
+    )
+    assert grp.min_participants == 2

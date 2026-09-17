@@ -197,6 +197,31 @@ def test_generate_replaces():
     print(f"generate-replaces OK schedule_id={fresh_id}")
 
 
+def test_json_roundtrip():
+    """JSON-бэкап должен сохранять и восстанавливать цены и ставки педагогов."""
+    exp = client.get("/api/dev/export")
+    assert exp.status_code == 200, exp.text[:300]
+    payload = exp.json()
+
+    price_count = len(payload.get("prices", []) or [])
+    rate_count = len(payload.get("teacher_rates", []) or [])
+    assert price_count > 0, "в экспорте нет цен"
+    assert rate_count > 0, "в экспорте нет ставок педагогов"
+
+    r = client.post("/api/dev/import", json=payload)
+    assert r.status_code == 200, f"import failed: {r.status_code} {r.text[:300]}"
+    counts = r.json().get("counts", {})
+    assert counts.get("prices") == price_count, f"цены: {counts.get('prices')} != {price_count}"
+    assert counts.get("teacher_rates") == rate_count, f"ставки: {counts.get('teacher_rates')} != {rate_count}"
+    assert not r.json().get("warnings"), f"есть замечания: {r.json().get('warnings')}"
+
+    prices = client.get("/api/prices").json()["items"]
+    rates = client.get("/api/finance/teacher-rates").json()["items"]
+    assert len(prices) == price_count
+    assert len(rates) == rate_count
+    print(f"json-roundtrip OK prices={price_count} teacher_rates={rate_count}")
+
+
 if __name__ == "__main__":
     setup_db()
     test_seed_and_list()
@@ -206,4 +231,5 @@ if __name__ == "__main__":
     test_export(sched_id)
     test_manual_edit_conflict()
     test_generate_replaces()
+    test_json_roundtrip()
     print("ALL BACKEND TESTS PASSED")

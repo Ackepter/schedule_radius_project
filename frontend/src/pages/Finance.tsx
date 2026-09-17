@@ -755,14 +755,17 @@ export default function Finance() {
           <TextField
             label="Мин. участников"
             type="number"
-            value={priceForm.min_participants}
+            value={priceForm.lesson_type === 'individual' ? 1 : priceForm.min_participants}
+            disabled={priceForm.lesson_type === 'individual'}
             onChange={(e) => setPriceForm({ ...priceForm, min_participants: Number(e.target.value) })}
             fullWidth
+            helperText={priceForm.lesson_type === 'individual' ? 'Индивидуальное занятие — строго 1 участник' : undefined}
           />
           <TextField
             label="Макс. участников"
             type="number"
-            value={priceForm.max_participants}
+            value={priceForm.lesson_type === 'individual' ? 1 : priceForm.max_participants}
+            disabled={priceForm.lesson_type === 'individual'}
             onChange={(e) => setPriceForm({ ...priceForm, max_participants: Number(e.target.value) })}
             fullWidth
           />

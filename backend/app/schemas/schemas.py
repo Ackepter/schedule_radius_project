@@ -324,6 +324,11 @@ class PriceCreate(SchemaBase):
     def _check_participants_range(self) -> "PriceCreate":
         if self.min_participants > self.max_participants:
             raise ValueError("min_participants must be <= max_participants")
+        if self.lesson_type == LessonTypeEnum.individual:
+            if self.min_participants != 1 or self.max_participants != 1:
+                raise ValueError(
+                    "Индивидуальное занятие — строго 1 участник"
+                )
         return self
 
 
@@ -333,6 +338,27 @@ class PriceUpdate(SchemaBase):
     min_participants: Optional[int] = Field(default=None, ge=1)
     max_participants: Optional[int] = Field(default=None, ge=1)
     price_per_student: Optional[float] = Field(default=None, ge=0.0)
+
+    @model_validator(mode="after")
+    def _check_participants_range(self) -> "PriceUpdate":
+        if (
+            self.min_participants is not None
+            and self.max_participants is not None
+            and self.min_participants > self.max_participants
+        ):
+            raise ValueError("min_participants must be <= max_participants")
+        if self.lesson_type == LessonTypeEnum.individual:
+            if (
+                self.min_participants is not None
+                and self.min_participants != 1
+            ) or (
+                self.max_participants is not None
+                and self.max_participants != 1
+            ):
+                raise ValueError(
+                    "Индивидуальное занятие — строго 1 участник"
+                )
+        return self
 
 
 class PriceList(PriceBase):

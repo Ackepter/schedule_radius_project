@@ -55,6 +55,13 @@ def update_price(
         raise HTTPException(status_code=404, detail="Price not found")
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(obj, field, value)
+    if obj.lesson_type == LessonTypeEnum.individual:
+        if obj.min_participants != 1 or obj.max_participants != 1:
+            db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail="Индивидуальное занятие — строго 1 участник",
+            )
     db.commit()
     db.refresh(obj)
     return DataResponse(data=PriceBase.model_validate(obj))
