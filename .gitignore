@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Databases (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup/config artifacts in project root
+/backup-*.json
+/test.json
+
+# Generated exports
+exports/
+*.xlsx
+*.pdf
+*.png
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+
+# OS / editors
+.DS_Store
+Thumbs.db
