@@ -225,8 +225,8 @@ def form_groups(
                         subject_id=subject_id,
                         subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
                         reason=(
-                            f"Нет доступности ученика длительностью {duration} мин "
-                            f"для группового занятия."
+                            f"Возможна групповая форма, но у ребёнка нет свободного слота "
+                            f"длительностью {duration} мин."
                         ),
                     )
                 )
@@ -260,8 +260,8 @@ def form_groups(
                             subject_id=subject_id,
                             subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
                             reason=(
-                                f"Недостаточно учеников для формирования группы "
-                                f"(минимальный размер группы — {min_size})."
+                                f"Возможна групповая форма, но не хватает желающих: "
+                                f"нужно минимум {min_size} учеников с общими слотами."
                             ),
                         )
                     )

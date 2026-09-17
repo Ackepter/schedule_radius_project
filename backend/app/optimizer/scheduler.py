@@ -99,6 +99,7 @@ class UnscheduledInfo:
     name: str
     reason: str
     suggestions: list[str] = field(default_factory=list)
+    level: str = "error"  # "error" — не размещено, "info" — возможность / рекомендация
 
 
 @dataclass
@@ -757,6 +758,7 @@ def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -
                 name=fg.subject_name,
                 reason=fg.reason,
                 suggestions=["Добавить ещё одного ребёнка на это направление"],
+                level="info",
             ),
         )
 

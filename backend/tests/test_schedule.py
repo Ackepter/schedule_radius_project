@@ -240,8 +240,10 @@ def test_group_respects_all_participants_availability(fresh_db):
     assert res.success, res.message
     assert not any(l["lesson_type"] == "group" for l in res.scheduled), \
         "группа без общего дня не может быть размещена"
-    assert any("Недостаточно учеников" in u.reason for u in res.unscheduled), \
-        "одиночная групповая заявка должна попасть в отчёт неразмещённых"
+    assert any("Возможна групповая форма" in u.reason for u in res.unscheduled), \
+        "одиночная групповая заявка должна попасть в отчёт в информационном виде"
+    assert any(u.level == "info" for u in res.unscheduled), \
+        "несформированная группа должна быть информационной, а не ошибкой"
 
     # контроль: двое с общим днём образуют группу
     _group_request(db, [st3], s)
@@ -465,5 +467,5 @@ def test_incompatible_students_not_grouped_together(fresh_db):
         member_ids = sorted(l.get("students") or [])
         assert a.id in member_ids and c.id in member_ids, f"неверный состав группы: {member_ids}"
         assert b.id not in member_ids, "исключённый ученик не должен попасть в группу"
-    assert any("Недостаточно учеников" in u.reason for u in res.unscheduled), \
+    assert any("Возможна групповая форма" in u.reason for u in res.unscheduled), \
         "исключённый ученик должен остаться без группы и попасть в отчёт"

@@ -102,7 +102,7 @@ export default function Schedule() {
 
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
   const [unscheduledReport, setUnscheduledReport] = useState('')
-  const [unscheduledItems, setUnscheduledItems] = useState<Array<{ identifier: string; name?: string; reason: string; suggestions?: string[] }>>([])
+  const [unscheduledItems, setUnscheduledItems] = useState<Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>>([])
 
   const [genErrorOpen, setGenErrorOpen] = useState(false)
   const [genErrorMsg, setGenErrorMsg] = useState('')
@@ -161,18 +161,22 @@ export default function Schedule() {
         scheduled_count: number
         unscheduled_count: number
         unscheduled_report?: string | null
-        unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[] }>
+        unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>
       }
+      const items = data.unscheduled || []
+      const hasErrorItems = items.some((it) => !it.level || it.level !== 'info')
       setSnackbar({
         open: true,
-        msg: `Расписание создано: ${data.scheduled_count} занятий размещено, ${data.unscheduled_count} не размещено`,
-        severity: data.unscheduled_count > 0 ? 'error' : 'success',
+        msg: hasErrorItems
+          ? `Расписание создано: ${data.scheduled_count} занятий размещено, ${data.unscheduled_count} не размещено`
+          : `Расписание создано: ${data.scheduled_count} занятий размещено`,
+        severity: hasErrorItems ? 'error' : 'success',
       })
       await loadSchedules()
       setSelectedScheduleId(data.schedule_id)
       if (data.unscheduled_count > 0) {
         setUnscheduledReport(data.unscheduled_report || '')
-        setUnscheduledItems(data.unscheduled || [])
+        setUnscheduledItems(items as Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>)
         setUnscheduledOpen(true)
       }
     } catch (err: unknown) {
@@ -362,6 +366,8 @@ export default function Schedule() {
 
   const currentSchedule = schedules.find((s) => s.id === selectedScheduleId)
 
+  const hasErrorItems = unscheduledItems.some((it) => !it.level || it.level !== 'info')
+
   const timeSlots: string[] = []
   for (let h = HOUR_START; h < HOUR_END; h++) {
     for (let m = 0; m < 60; m += 15) {
@@ -423,11 +429,37 @@ export default function Schedule() {
       {currentSchedule && (
         <Typography variant="subtitle1" sx={{ mb: 1 }} color="text.secondary">
           {currentSchedule.name} · {lessons.length} занятий
-          {currentSchedule.unscheduled_report && (
-            <Button size="small" sx={{ ml: 2 }} onClick={() => setUnscheduledOpen(true)}>
-              Неразмещённые занятия
-            </Button>
-          )}
+          {currentSchedule.unscheduled_report && (() => {
+            let isInfoOnly = false
+            try {
+              const raw = currentSchedule.unscheduled_report ?? ''
+              const parsed = JSON.parse(raw) as { unscheduled?: Array<{ level?: string }> }
+              const arr = parsed.unscheduled || []
+              isInfoOnly = arr.length > 0 && arr.every((it) => it.level === 'info')
+            } catch {
+              // ignore
+            }
+            return (
+              <Button
+                size="small"
+                sx={{ ml: 2 }}
+                onClick={() => {
+                  try {
+                    const raw = currentSchedule.unscheduled_report ?? ''
+                    const parsed = JSON.parse(raw) as {
+                      unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>
+                    }
+                    if (parsed.unscheduled) setUnscheduledItems(parsed.unscheduled)
+                  } catch {
+                    setUnscheduledItems([])
+                  }
+                  setUnscheduledOpen(true)
+                }}
+              >
+                {isInfoOnly ? 'Возможные групповые занятия' : 'Неразмещённые занятия'}
+              </Button>
+            )
+          })()}
         </Typography>
       )}
 
@@ -723,22 +755,21 @@ export default function Schedule() {
       </Dialog>
 
       <Dialog open={unscheduledOpen} onClose={() => setUnscheduledOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Неразмещённые занятия</DialogTitle>
+        <DialogTitle>{hasErrorItems ? 'Неразмещённые занятия' : 'Возможные групповые занятия'}</DialogTitle>
         <DialogContent>
           {unscheduledItems.map((item, i) => (
-            <Paper key={i} sx={{ p: 2, mb: 1.5, borderLeft: '4px solid #f44336' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                    {item.identifier}
-                  </Typography>
-                  {item.name && (
-                    <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                      {item.name}
-                    </Typography>
-                  )}
-                </Box>
+            <Paper key={i} sx={{ p: 2, mb: 1.5, borderLeft: item.level === 'info' ? '4px solid #0288d1' : '4px solid #f44336' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                <InfoOutlinedIcon fontSize="small" sx={{ color: item.level === 'info' ? '#0288d1' : 'error.main' }} />
+                <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+                  {item.identifier}
+                </Typography>
               </Box>
+              {item.name && (
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  {item.name}
+                </Typography>
+              )}
               <Typography variant="body2" sx={{ mb: 1.5, lineHeight: 1.5 }}>
                 {item.reason}
               </Typography>

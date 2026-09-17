@@ -212,6 +212,7 @@ export interface UnscheduledItem {
   name?: string | null
   reason: string
   suggestions?: string[]
+  level?: string
 }
 
 export interface ConflictDetail {
