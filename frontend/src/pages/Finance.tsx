@@ -117,10 +117,10 @@ export default function Finance() {
       api.get('/finance/teacher-rates'),
     ])
     setSchedules(sch.data as ScheduleBase[])
-    setSubjects(subj.data.items as Subject[])
-    setTeachers(teach.data.items as Teacher[])
-    setPrices(pr.data.items as Price[])
-    setRates(rt.data.items as TeacherRate[])
+    setSubjects(subj.data as Subject[])
+    setTeachers(teach.data as Teacher[])
+    setPrices(pr.data as Price[])
+    setRates(rt.data as TeacherRate[])
   }, [])
 
   useEffect(() => {
@@ -146,9 +146,9 @@ export default function Finance() {
     if (selectedScheduleId) loadSummary(selectedScheduleId)
   }, [selectedScheduleId, loadSummary])
 
-  const subjectName = (id: number) => subjects.find((s) => s.id === id)?.name ?? '—'
+  const subjectName = (id: number) => (subjects ?? []).find((s) => s.id === id)?.name ?? '—'
   const teacherName = (id: number) => {
-    const t = teachers.find((tt) => tt.id === id)
+    const t = (teachers ?? []).find((tt) => tt.id === id)
     return t ? `${t.last_name} ${t.first_name}` : '—'
   }
   const typeLabel = (t: string) =>
@@ -192,7 +192,7 @@ export default function Finance() {
       setPriceOpen(false)
       setSnackbar({ open: true, msg: 'Тариф сохранён', severity: 'success' })
       const pr = await api.get('/prices')
-      setPrices(pr.data.items as Price[])
+      setPrices(pr.data as Price[])
     } catch (err) {
       setSnackbar({ open: true, msg: errMsg(err), severity: 'error' })
     }
@@ -203,7 +203,7 @@ export default function Finance() {
     try {
       await api.delete(`/prices/${id}`)
       const pr = await api.get('/prices')
-      setPrices(pr.data.items as Price[])
+      setPrices(pr.data as Price[])
       setSnackbar({ open: true, msg: 'Тариф удалён', severity: 'success' })
     } catch (err) {
       setSnackbar({ open: true, msg: errMsg(err), severity: 'error' })
@@ -253,7 +253,7 @@ export default function Finance() {
       setRateOpen(false)
       setSnackbar({ open: true, msg: 'Ставка сохранена', severity: 'success' })
       const rt = await api.get('/finance/teacher-rates')
-      setRates(rt.data.items as TeacherRate[])
+      setRates(rt.data as TeacherRate[])
     } catch (err) {
       setSnackbar({ open: true, msg: errMsg(err), severity: 'error' })
     }
@@ -264,15 +264,15 @@ export default function Finance() {
     try {
       await api.delete(`/finance/teacher-rates/${id}`)
       const rt = await api.get('/finance/teacher-rates')
-      setRates(rt.data.items as TeacherRate[])
+      setRates(rt.data as TeacherRate[])
       setSnackbar({ open: true, msg: 'Ставка удалена', severity: 'success' })
     } catch (err) {
       setSnackbar({ open: true, msg: errMsg(err), severity: 'error' })
     }
   }
 
-  const defaultRates = rates.filter((r) => r.is_default)
-  const teacherRates = rates.filter((r) => !r.is_default)
+  const defaultRates = (rates ?? []).filter((r) => r.is_default)
+  const teacherRates = (rates ?? []).filter((r) => !r.is_default)
 
   return (
     <Box>
@@ -367,7 +367,7 @@ export default function Finance() {
               <Grid size={{ xs: 12, md: 6 }}>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="h6" gutterBottom>Кто сколько заработал (педагоги)</Typography>
-                  {summary.teacher_breakdown.length === 0 ? (
+                  {(summary.teacher_breakdown ?? []).length === 0 ? (
                     <Typography color="text.secondary">Нет данных</Typography>
                   ) : (
                     <TableContainer>
@@ -399,7 +399,7 @@ export default function Finance() {
               <Grid size={{ xs: 12, md: 6 }}>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="h6" gutterBottom>Кто сколько отдал (ученики)</Typography>
-                  {summary.student_breakdown.length === 0 ? (
+                  {(summary.student_breakdown ?? []).length === 0 ? (
                     <Typography color="text.secondary">Нет данных</Typography>
                   ) : (
                     <TableContainer>
@@ -433,10 +433,10 @@ export default function Finance() {
                   <Typography variant="h6" gutterBottom>Выручка по предметам и типам</Typography>
                   <Grid container spacing={2}>
                     <Grid size={{ xs: 12, sm: 6 }}>
-                      {Object.entries(summary.revenue_by_subject).length === 0 ? (
+                      {Object.keys(summary.revenue_by_subject ?? {}).length === 0 ? (
                         <Typography color="text.secondary">Нет данных</Typography>
                       ) : (
-                        Object.entries(summary.revenue_by_subject).map(([name, amount]) => (
+                        Object.entries(summary.revenue_by_subject ?? {}).map(([name, amount]) => (
                           <Box key={name} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
                             <Typography>{name}</Typography>
                             <Typography sx={{ fontWeight: 'bold' }}>{fmt(amount)}</Typography>
@@ -445,10 +445,10 @@ export default function Finance() {
                       )}
                     </Grid>
                     <Grid size={{ xs: 12, sm: 6 }}>
-                      {Object.entries(summary.revenue_by_lesson_type).length === 0 ? (
+                      {Object.keys(summary.revenue_by_lesson_type ?? {}).length === 0 ? (
                         <Typography color="text.secondary">Нет данных</Typography>
                       ) : (
-                        Object.entries(summary.revenue_by_lesson_type).map(([type, amount]) => (
+                        Object.entries(summary.revenue_by_lesson_type ?? {}).map(([type, amount]) => (
                           <Box key={type} sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
                             <Typography>{typeLabel(type)}</Typography>
                             <Typography sx={{ fontWeight: 'bold' }}>{fmt(amount)}</Typography>
@@ -493,7 +493,7 @@ export default function Finance() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {prices.map((p) => (
+                {(prices ?? []).map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>{subjectName(p.subject_id)}</TableCell>
                     <TableCell><Chip size="small" label={typeLabel(p.lesson_type)} /></TableCell>
@@ -509,7 +509,7 @@ export default function Finance() {
                     </TableCell>
                   </TableRow>
                 ))}
-                {prices.length === 0 && (
+                {(prices ?? []).length === 0 && (
                   <TableRow>
                     <TableCell colSpan={5} align="center" color="text.secondary">Нет тарифов — добавьте хотя бы один</TableCell>
                   </TableRow>
@@ -618,7 +618,7 @@ export default function Finance() {
               label="Направление"
               onChange={(e) => setPriceForm({ ...priceForm, subject_id: Number(e.target.value) })}
             >
-              {subjects.map((s) => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+              {(subjects ?? []).map((s) => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl fullWidth>
@@ -683,7 +683,7 @@ export default function Finance() {
               }}
             >
               <MenuItem value="">По умолчанию (все педагоги)</MenuItem>
-              {teachers.map((t) => (
+              {(teachers ?? []).map((t) => (
                 <MenuItem key={t.id} value={t.id}>{t.last_name} {t.first_name}</MenuItem>
               ))}
             </Select>
@@ -695,7 +695,7 @@ export default function Finance() {
               label="Направление"
               onChange={(e) => setRateForm({ ...rateForm, subject_id: Number(e.target.value) })}
             >
-              {subjects.map((s) => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+              {(subjects ?? []).map((s) => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl fullWidth>
