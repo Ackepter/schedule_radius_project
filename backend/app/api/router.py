@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api import (
     availabilities,
@@ -17,8 +17,10 @@ from app.api import (
     teachers,
     teacher_rates,
 )
+from app.api.deps import require_auth
 
-api_router = APIRouter(prefix="/api")
+# Все бизнес/админ endpoints требуют авторизации.
+api_router = APIRouter(prefix="/api", dependencies=[Depends(require_auth)])
 
 api_router.include_router(students.router, prefix="/students", tags=["students"])
 api_router.include_router(teachers.router, prefix="/teachers", tags=["teachers"])

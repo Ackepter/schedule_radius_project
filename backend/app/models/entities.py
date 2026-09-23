@@ -1,5 +1,5 @@
 import enum
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Optional
 
 from sqlalchemy import (
@@ -99,6 +99,42 @@ class EntityTypeEnum(str, enum.Enum):
     teacher = "teacher"
     room = "room"
     lesson_request = "lesson_request"
+
+
+# ---------- Auth ----------
+
+class User(Base, TimestampMixin):
+    """Пользователь приложения (создаётся владельцем через CLI)."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(100), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+
+class AuthSession(Base):
+    """Server-side авторизационная сессия.
+
+    В cookie хранится случайный токен; в БД — только его SHA-256,
+    поэтому утечка БД не даёт действующих сессий.
+    """
+
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash = Column(String(64), nullable=False, unique=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["User"] = relationship("User")
 
 
 # ---------- Models ----------

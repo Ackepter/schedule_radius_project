@@ -8,6 +8,7 @@
 - Финансовая статистика
 - CRUD по всем сущностям (ученики, педагоги, предметы, кабинеты, группы, цены)
 - Группы формируются пользователем; оптимизатор не изменяет их состав
+- Авторизация: вход по логину/паролю, server-side сессии (HttpOnly cookie)
 
 ---
 
@@ -19,6 +20,34 @@
 | Frontend | React 18, TypeScript, Vite, Material UI, react-router-dom, axios |
 | База данных | PostgreSQL 16 |
 | Контейнеризация | Docker, Docker Compose |
+| Пароли | Argon2id (`argon2-cffi`) |
+
+---
+
+## Авторизация
+
+- Публичной регистрации **нет**. Пользователей создаёт только владелец приложения.
+- Пароли хранятся только как Argon2id-хэши; в API никогда не возвращаются.
+- Сессии server-side: в cookie — случайный токен (HttpOnly), в БД — только его SHA-256.
+  Logout инвалидирует сессию на сервере; TTL по умолчанию 24 часа.
+- Все `/api/*` endpoints (кроме `/health`, `login`, `logout`, `me`) требуют авторизации → 401.
+- Login защищён rate limiting: 5 неудачных попыток на 15 минут (по IP и имени пользователя).
+
+### Создание первого пользователя (локально, вне Docker)
+
+```bash
+cd backend
+python -m app.cli create-user
+# или неинтерактивно:
+python -m app.cli create-user --username admin --password 'сложный-пароль'
+```
+
+### Создание пользователя в Docker
+
+```bash
+# на хосте, где есть доступ к сети compose:
+docker compose exec backend python -m app.cli create-user
+```
 
 ---
 
@@ -31,16 +60,19 @@ cp .env.example .env
 # собрать и запустить всё
 docker compose up --build
 
-# при первом запуске создаются таблицы через Alembic,
-# после чего автоматически заполняются демо-данными (SEED_ON_STARTUP=true)
+# создать пользователя для входа
+docker compose exec backend python -m app.cli create-user
 ```
 
 | Сервис | URL |
 |--------|-----|
 | Frontend | http://localhost:8080 |
-| Backend API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
+| API Docs (локально) | http://localhost:8000/docs |
 | PostgreSQL | localhost:5432 |
+
+> Backend API намеренно **не публикуется** наружу: доступ только через nginx
+> на фронтовом контейнере. Для локальной разработки backend поднимается
+> отдельно (см. ниже).
 
 ---
 
@@ -58,6 +90,7 @@ pip install -r requirements.txt
 
 export DATABASE_URL=sqlite:///./dev.db   # для быстрой разработки
 alembic upgrade head
+python -m app.cli create-user
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -76,8 +109,11 @@ npm run dev    # Vite dev-сервер на :5173 с прокси /api → local
 ```bash
 cd backend
 
-# 12 сценарных тестов оптимизатора
+# сценарные тесты оптимизатора
 python -m pytest tests/test_schedule.py -v
+
+# тесты авторизации (login, сессии, rate limiting, защита API)
+python -m pytest tests/test_auth.py -v
 
 # Функциональный тест полного цикла
 python tests/functional_test.py
@@ -94,7 +130,14 @@ python tests/functional_test.py
 | `POSTGRES_PASSWORD` | `children_password` | Пароль PostgreSQL |
 | `POSTGRES_DB` | `children_center` | Имя базы данных |
 | `CORS_ORIGINS` | `http://localhost:8080,...` | Разрешённые origins через запятую |
-| `SEED_ON_STARTUP` | `true` | Заполнять демо-данными при старте |
+| `SEED_ON_STARTUP` | `false` | Заполнять демо-данными при старте |
+| `SESSION_TTL_HOURS` | `24` | Время жизни сессии, часы |
+| `COOKIE_SECURE` | `false` | `Secure` для cookie (включать за HTTPS) |
+| `COOKIE_SAMESITE` | `lax` | `SameSite` для cookie |
+| `LOGIN_MAX_FAILURES` | `5` | Неудачных попыток входа до блокировки |
+| `LOGIN_WINDOW_MINUTES` | `15` | Окно для блокировки, минуты |
+
+> **Внимание:** файл `.env` занесён в `.gitignore`; не коммитьте секреты.
 
 ---
 
@@ -103,13 +146,13 @@ python tests/functional_test.py
 ```
 ├── backend/
 │   ├── app/
-│   │   ├── api/           # FastAPI роутеры
-│   │   ├── core/          # config, database
+│   │   ├── api/           # FastAPI роутеры (+auth, deps)
+│   │   ├── core/          # config, database, security, ratelimit
 │   │   ├── db/            # seed
-│   │   ├── models/        # SQLAlchemy модели
+│   │   ├── models/        # SQLAlchemy модели (users, sessions)
 │   │   ├── optimizer/     # CP-SAT оптимизатор (scheduler.py)
 │   │   ├── schemas/       # Pydantic схемы
-│   │   ├── services/      # Бизнес-логика (конфликт, цены, экспорт)
+│   │   ├── services/      # Бизнес-логика (+user_service)
 │   │   └── main.py
 │   ├── alembic/           # Миграции
 │   ├── tests/
@@ -118,7 +161,8 @@ python tests/functional_test.py
 ├── frontend/
 │   ├── src/
 │   │   ├── api/           # axios клиент, типы
-│   │   ├── pages/         # React страницы
+│   │   ├── auth/          # AuthContext, ProtectedRoute
+│   │   ├── pages/         # React страницы (+LoginPage)
 │   │   └── App.tsx
 │   ├── Dockerfile
 │   └── nginx.conf

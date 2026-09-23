@@ -10,6 +10,7 @@ import {
   Typography,
   Box,
   Divider,
+  IconButton,
 } from '@mui/material'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import SchoolIcon from '@mui/icons-material/School'
@@ -19,6 +20,7 @@ import MeetingRoomIcon from '@mui/icons-material/MeetingRoom'
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth'
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance'
 import DeveloperModeIcon from '@mui/icons-material/DeveloperMode'
+import LogoutIcon from '@mui/icons-material/Logout'
 import Dashboard from './pages/Dashboard'
 import Students from './pages/Students'
 import Teachers from './pages/Teachers'
@@ -27,6 +29,9 @@ import Rooms from './pages/Rooms'
 import Schedule from './pages/Schedule'
 import Finance from './pages/Finance'
 import Developer from './pages/Developer'
+import LoginPage from './pages/LoginPage'
+import ProtectedRoute from './auth/ProtectedRoute'
+import { useAuth } from './auth/AuthContext'
 
 const DRAWER_WIDTH = 260
 
@@ -44,9 +49,10 @@ const DEV_NAV_ITEMS = [
   { label: 'Для разработчика', path: '/developer', icon: <DeveloperModeIcon /> },
 ]
 
-export default function App() {
+function Shell() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user, logout } = useAuth()
 
   return (
     <Box sx={{ display: 'flex' }}>
@@ -55,6 +61,21 @@ export default function App() {
           <Typography variant="h6" noWrap sx={{ flexGrow: 1 }}>
             Центр детских занятий — Расписание
           </Typography>
+          {user && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2">{user.username}</Typography>
+              <IconButton
+                color="inherit"
+                aria-label="Выйти"
+                onClick={async () => {
+                  await logout()
+                  navigate('/login', { replace: true })
+                }}
+              >
+                <LogoutIcon />
+              </IconButton>
+            </Box>
+          )}
         </Toolbar>
       </AppBar>
 
@@ -111,5 +132,21 @@ export default function App() {
         </Routes>
       </Box>
     </Box>
+  )
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/*"
+        element={
+          <ProtectedRoute>
+            <Shell />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   )
 }

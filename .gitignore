@@ -17,6 +17,11 @@ venv/
 /backup-*.json
 /test.json
 
+# Secrets / env
+.env
+*.env.local
+.env.*.local
+
 # Generated exports
 exports/
 *.xlsx

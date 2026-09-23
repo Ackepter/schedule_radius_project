@@ -31,9 +31,12 @@ def dev_import(payload: dict, db: Session = Depends(get_db)):
 
     try:
         result = import_all(db, payload)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Ошибка импорта: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Ошибка импорта: данные не соответствуют ожидаемому формату",
+        ) from None
     return {
         "message": "Импорт выполнен успешно",
         "counts": {k: v for k, v in result.items() if k != "warnings"},

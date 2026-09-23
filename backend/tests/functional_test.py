@@ -4,6 +4,8 @@ import os
 import sys
 from datetime import time
 
+import pytest
+
 os.environ["DATABASE_URL"] = "sqlite:///C:/Users/Ackepter/Desktop/work_project2/test_sqlite.db"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,8 +24,29 @@ def setup_db():
     db = SessionLocal()
     try:
         seed_database(db, force=True)
+        from app.core.ratelimit import LoginRateLimiter
+
+        from app.services.user_service import create_user
+
+        from app.api.auth import login_limiter
+
+        login_limiter.reset()
+        create_user(db, "admin", "testpassword123")
     finally:
         db.close()
+    r = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "testpassword123"},
+    )
+    assert r.status_code == 200, f"login failed: {r.text}"
+    print("auth login OK")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _setup_db_fixture():
+    """При запуске через pytest (в т.ч. вместе с test_auth.py) подготавливаем БД."""
+    setup_db()
+    yield
 
 
 def test_seed_and_list():
@@ -56,7 +79,7 @@ def test_seed_and_list():
     print("seed+list OK")
 
 
-def test_generate_schedule():
+def _generate_schedule():
     r = client.post("/api/schedules/generate")
     assert r.status_code == 200, f"{r.status_code}: {r.text[:500]}"
     resp = r.json()["data"]
@@ -64,6 +87,15 @@ def test_generate_schedule():
     print(f"generate OK schedule_id={sched_id} scheduled={resp['scheduled_count']} unscheduled={resp['unscheduled_count']}")
     assert resp["scheduled_count"] > 0
     return sched_id
+
+
+def test_generate_schedule():
+    return _generate_schedule()
+
+
+@pytest.fixture(scope="module")
+def sched_id():
+    return _generate_schedule()
 
 
 def test_conflict_freedom(sched_id):

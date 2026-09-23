@@ -21,13 +21,19 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: "postgresql+psycopg2://${POSTGRES_USER:-children}:${POSTGRES_PASSWORD:-children_password}@postgres:5432/${POSTGRES_DB:-children_center}"
-      CORS_ORIGINS: "http://localhost:8080,http://localhost"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080,http://localhost}"
       SEED_ON_STARTUP: "${SEED_ON_STARTUP:-false}"
+      SESSION_TTL_HOURS: "${SESSION_TTL_HOURS:-24}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      COOKIE_SAMESITE: "${COOKIE_SAMESITE:-lax}"
+      LOGIN_MAX_FAILURES: "${LOGIN_MAX_FAILURES:-5}"
+      LOGIN_WINDOW_MINUTES: "${LOGIN_WINDOW_MINUTES:-15}"
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "8000:8000"
+    # Backend НЕ публикуется наружу: доступ только через nginx (frontend:80).
+    expose:
+      - "8000"
 
   frontend:
     build:

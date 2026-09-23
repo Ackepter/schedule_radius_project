@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     center_open_hour: int = 9
     center_close_hour: int = 20
 
+    # ── Authentication ──────────────────────────────────────────────────────
+    session_ttl_hours: int = 24
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
+    session_cookie_name: str = "session_token"
+
+    # ── Login brute-force protection ───────────────────────────────────────
+    login_max_failures: int = 5
+    login_window_minutes: int = 15
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
