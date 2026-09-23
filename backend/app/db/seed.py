@@ -29,9 +29,21 @@ def _merge_avail(a: list[tuple[int, time, time]]) -> list[tuple[int, time, time]
     return a
 
 
-def seed_database(db: Session) -> dict:
-    """Заполняет базу демонстрационными данными."""
+def seed_database(db: Session, *, force: bool = False) -> dict:
+    """Заполняет базу демонстрационными данными.
+
+    По умолчанию не затирает существующие данные: если база уже содержит
+    направления — сидинг пропускается. force=True принудительно очищает
+    и заполняет базу (используется только вручную/в тестах).
+    """
+    from sqlalchemy import func
+
     from app.services.backup_service import wipe_all_data
+
+    if not force:
+        existing = db.scalar(select(func.count()).select_from(Subject))
+        if existing:
+            return {"skipped": True, "reason": "database already contains data"}
 
     wipe_all_data(db)
 

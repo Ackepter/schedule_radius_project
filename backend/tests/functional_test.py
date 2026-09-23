@@ -21,7 +21,7 @@ def setup_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        seed_database(db)
+        seed_database(db, force=True)
     finally:
         db.close()
 

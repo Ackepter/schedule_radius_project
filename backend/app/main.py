@@ -19,6 +19,8 @@ async def lifespan(app: FastAPI):
 
         db = SessionLocal()
         try:
+            # Сидинг сам пропускается, если база уже содержит данные,
+            # чтобы не затирать данные с прошлых запусков
             seed_database(db)
         finally:
             db.close()

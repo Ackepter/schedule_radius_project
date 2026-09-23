@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+psycopg2://${POSTGRES_USER:-children}:${POSTGRES_PASSWORD:-children_password}@postgres:5432/${POSTGRES_DB:-children_center}"
       CORS_ORIGINS: "http://localhost:8080,http://localhost"
-      SEED_ON_STARTUP: "${SEED_ON_STARTUP:-true}"
+      SEED_ON_STARTUP: "${SEED_ON_STARTUP:-false}"
     depends_on:
       postgres:
         condition: service_healthy

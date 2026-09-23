@@ -11,5 +11,5 @@ router = APIRouter()
 def seed_data(db: Session = Depends(get_db)):
     from app.db.seed import seed_database
 
-    seed_database(db)
+    seed_database(db, force=True)
     return MessageResponse(message="Seed data loaded successfully")
