@@ -22,6 +22,12 @@ from app.models.entities import (
     room_subjects,
     teacher_subjects,
 )
+from app.optimizer.diagnosis import (
+    Diagnosis,
+    Placement,
+    UnplacedLesson,
+    diagnose,
+)
 from app.optimizer.grouping import FailedGroup, form_groups
 
 MINUTES_IN_DAY = 1440
@@ -66,8 +72,15 @@ class StudentAvail:
     db_id: int
     name: str
     availability: dict[int, list[tuple[int, int]]] = field(default_factory=dict)
+    has_any_availability: bool = False
 
-    def fits(self, day: int, start_slot: int, dur_slots: int) -> bool:
+    def fits(
+        self, day: int, start_slot: int, dur_slots: int, slots_in_day: int = 0
+    ) -> bool:
+        # Доступность не задана — ученик свободен весь рабочий день,
+        # как педагог и кабинет (TeacherCand.fits / RoomCand.fits).
+        if not self.has_any_availability:
+            return 0 <= start_slot and start_slot + dur_slots <= slots_in_day
         return any(
             ivs <= start_slot and start_slot + dur_slots <= ive
             for (ivs, ive) in self.availability.get(day, [])
@@ -100,6 +113,7 @@ class UnscheduledInfo:
     reason: str
     suggestions: list[str] = field(default_factory=list)
     level: str = "error"  # "error" — не размещено, "info" — возможность / рекомендация
+    details: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -321,7 +335,7 @@ def build_and_solve(
                 ok = True
                 for sid in occ.student_ids:
                     st = students.get(sid)
-                    if st is None or not st.fits(d, s, dur_slots):
+                    if st is None or not st.fits(d, s, dur_slots, slots_in_day):
                         ok = False
                         break
                 if ok:
@@ -334,7 +348,8 @@ def build_and_solve(
 
         r_ids = _rooms_for_subject(db, occ.subject_id)
         n_participants = len(occ.student_ids) or 1
-        r_cands = [r for r in all_rooms if r.db_id in r_ids and r.capacity >= n_participants]
+        all_r_cands = [r for r in all_rooms if r.db_id in r_ids]
+        r_cands = [r for r in all_r_cands if r.capacity >= n_participants]
 
         occs_data.append(
             {
@@ -344,6 +359,7 @@ def build_and_solve(
                 "positions": positions,
                 "teachers": t_cands,
                 "rooms": r_cands,
+                "all_rooms": all_r_cands,
             }
         )
 
@@ -602,40 +618,27 @@ def build_and_solve(
         return result
 
     result.success = True
+    placement_by_oi: dict[int, Placement] = {}
     for oi, od in enumerate(occs_data):
-        occ = od["occ"]
-        if oi not in PRESENT:
-            # Нет переменных — вообще нет валидных комбинаций (студенты/педагоги/кабинеты не пересекаются)
-            student_names = ", ".join(students[sid].name for sid in occ.student_ids if sid in students)
-            student_part = f" ({student_names})" if student_names else ""
-            result.unscheduled.append(
-                UnscheduledInfo(
-                    identifier=occ.id,
-                    name=occ.title,
-                    reason=(
-                        f"Нет ни одного слота, где свободны и ученик{student_part}, "
-                        f"и педагог, и кабинет одновременно."
-                    ),
-                    suggestions=["Добавить педагога", "Добавить кабинет", "Расширить доступность детей"],
-                )
-            )
-            continue
-        if not solver.Value(PRESENT[oi]):
-            diag = _diagnose(db, occ, od, slots_in_day, students)
-            result.unscheduled.append(
-                UnscheduledInfo(
-                    identifier=occ.id, name=occ.title,
-                    reason=diag["reason"], suggestions=diag["suggestions"],
-                )
-            )
+        if oi not in PRESENT or not solver.Value(PRESENT[oi]):
             continue
         d = solver.Value(DAY_VAR[oi])
         s = solver.Value(SLOT_VAR[oi])
         start_min = _slot_to_minutes(s, open_min)
+        end_min = start_min + od["dur_min"]
         ti = next(ti for ti in teacher_sel[oi] if solver.Value(teacher_sel[oi][ti]))
         ri = next(ri for ri in room_sel[oi] if solver.Value(room_sel[oi][ri]))
+        occ = od["occ"]
+        placement_by_oi[oi] = Placement(
+            teacher_id=od["teachers"][ti].db_id,
+            room_id=od["rooms"][ri].db_id,
+            day=d,
+            start_min=start_min,
+            end_min=end_min,
+            student_ids=tuple(occ.student_ids),
+            title=occ.subject_name,
+        )
         h1, m1 = divmod(start_min, 60)
-        end_min = start_min + od["dur_min"]
         h2, m2 = divmod(end_min, 60)
         result.scheduled.append(
             {
@@ -652,7 +655,81 @@ def build_and_solve(
             }
         )
 
+    placements = list(placement_by_oi.values())
+    # Нет записей о доступности — человек свободен весь рабочий день (как в TeacherCand.fits)
+    whole_day = {d: [(0, slots_in_day * 15)] for d in range(7)}
+    teacher_windows = {
+        tc.db_id: (tc.availability if tc.has_any_availability else whole_day)
+        for tc in all_teachers
+    }
+    room_windows = {
+        rc.db_id: (rc.availability if rc.has_any_availability else whole_day)
+        for rc in all_rooms
+    }
+
+    for oi, od in enumerate(occs_data):
+        if oi in placement_by_oi:
+            continue
+        occ = od["occ"]
+        title = _occurrence_title(occ, students)
+        diag = _diagnose(
+            db=db,
+            occ=occ,
+            od=od,
+            slots_in_day=slots_in_day,
+            open_min=open_min,
+            dur_slots=od["dur_slots"],
+            students=students,
+            teachers=teachers,
+            rooms=rooms,
+            placements=placements,
+            teacher_windows=teacher_windows,
+            room_windows=room_windows,
+        )
+        result.unscheduled.append(
+            UnscheduledInfo(
+                identifier=occ.id,
+                name=title,
+                reason=diag.reason,
+                suggestions=diag.suggestions,
+                details=diag.details,
+            )
+        )
+
     return result
+
+
+def _occurrence_title(occ: LessonOccurrence, students: dict[int, StudentAvail]) -> str:
+    """Человеческое название занятия для отчёта: предмет + участники."""
+    if len(occ.student_ids) <= 1:
+        names = [students[sid].name for sid in occ.student_ids if sid in students]
+        who = names[0] if names else ""
+        kind = "Групповое" if occ.lesson_type == LessonTypeEnum.group else "Индивидуальное"
+        return f"{kind}: {occ.subject_name}" + (f" — {who}" if who else "")
+    names = [students[sid].name for sid in occ.student_ids if sid in students]
+    kind = "Групповое"
+    return f"{kind}: {occ.subject_name} — " + ", ".join(names)
+
+
+def _abs_minutes(windows: dict[int, list[tuple[int, int]]], open_min: int) -> dict[int, list[tuple[int, int]]]:
+    """Переводит слоты в минуты от полуночи — так их видит человек."""
+    return {
+        day: [(open_min + s * 15, open_min + e * 15) for (s, e) in ivs]
+        for day, ivs in windows.items()
+    }
+
+
+def _inactive_teachers_for_subject(db: Session, subject_id: int) -> list[Teacher]:
+    return list(
+        db.scalars(
+            select(Teacher)
+            .join(teacher_subjects, teacher_subjects.c.teacher_id == Teacher.id)
+            .where(
+                teacher_subjects.c.subject_id == subject_id,
+                Teacher.is_active.is_(False),
+            )
+        ).all()
+    )
 
 
 def _diagnose(
@@ -660,74 +737,75 @@ def _diagnose(
     occ: LessonOccurrence,
     od: dict,
     slots_in_day: int,
+    open_min: int,
+    dur_slots: int,
     students: dict[int, StudentAvail],
-) -> dict:
-    reasons: list[str] = []
-    suggestions: list[str] = []
+    teachers: dict[int, TeacherCand],
+    rooms: dict[int, RoomCand],
+    placements: list[Placement],
+    teacher_windows: dict[int, dict[int, list[tuple[int, int]]]],
+    room_windows: dict[int, dict[int, list[tuple[int, int]]]],
+) -> Diagnosis:
+    """Делает `od` пригодным для diagnosis.diagnose и зовёт его."""
+    slot_positions: list[tuple[int, int]] = [
+        (d, open_min + s * 15)
+        for (d, s) in od["positions"]
+        if s + dur_slots <= slots_in_day
+    ]
 
-    student_names = ", ".join(students[sid].name for sid in occ.student_ids if sid in students)
-    student_desc = f" (ученики: {student_names})" if student_names else ""
+    n_participants = len(occ.student_ids) or 1
+    lesson = UnplacedLesson(
+        subject_name=occ.subject_name,
+        duration_minutes=od["dur_min"],
+        participants=n_participants,
+        student_names=[students[sid].name for sid in occ.student_ids if sid in students],
+        lesson_type=occ.lesson_type.value,
+        teacher_candidates=[(t.db_id, t.name) for t in od["teachers"]],
+        # кабинеты, проходящие по вместимости — именно их оптимизатор использовал
+        room_candidates=[
+            (r.db_id, r.name, r.capacity)
+            for r in od["all_rooms"]
+            if r.capacity >= n_participants
+        ],
+        # а это все кабинеты, разрешённые для направления: нужны, чтобы объяснить
+        # нехватку вместимости, а не «занятость»
+        subject_rooms=[(r.db_id, r.name, r.capacity) for r in od["all_rooms"]],
+        preferred_teacher=(
+            (occ.preferred_teacher_id, teachers[occ.preferred_teacher_id].name)
+            if occ.preferred_teacher_id in teachers
+            else None
+        ),
+        teacher_required=occ.teacher_is_required,
+        inactive_teachers=[
+            f"{t.last_name} {t.first_name}".strip()
+            for t in _inactive_teachers_for_subject(db, occ.subject_id)
+        ],
+    )
 
-    if not od["teachers"]:
-        if occ.preferred_teacher_id is not None and occ.teacher_is_required:
-            reasons.append(
-                f"У занятия «{occ.subject_name}»{student_desc} обязательный педагог не ведёт это направление или недоступен."
-            )
-            suggestions.append("Назначить другого обязательного педагога или снять флаг «обязательный»")
+    student_windows: list[tuple[str, dict[int, list[tuple[int, int]]]]] = []
+    for sid in occ.student_ids:
+        st = students.get(sid)
+        if st is None:
+            continue
+        if not st.availability:
+            # доступность не задана — человек считает доступным всё рабочее время
+            whole = {d: [(open_min, open_min + slots_in_day * 15)] for d in range(7)}
+            student_windows.append((st.name, whole))
         else:
-            reasons.append(f"По направлению «{occ.subject_name}»{student_desc} нет активных педагогов.")
-            suggestions.append("Добавить педагога на это направление")
+            student_windows.append((st.name, _abs_minutes(st.availability, open_min)))
 
-    if not od["rooms"]:
-        n = len(occ.student_ids) or 1
-        reasons.append(
-            f"Нет кабинета для направления «{occ.subject_name}»{student_desc} вместимостью не менее {n}."
-        )
-        suggestions.append("Добавить кабинет подходящей вместимости")
-
-    if not od["positions"]:
-        reasons.append(
-            f"У ученика(ов){student_desc} нет пересекающихся свободных интервалов длительностью {occ.duration_minutes} мин."
-        )
-        suggestions.append("Расширить доступность детей")
-
-    free = busy = 0
-    t_only_busy = 0
-    r_only_busy = 0
-    for (d, s) in od["positions"][:200]:
-        has_t = any(t.fits(d, s, od["dur_slots"], slots_in_day) for t in od["teachers"])
-        has_r = any(r.fits(d, s, od["dur_slots"], slots_in_day) for r in od["rooms"])
-        if has_t and has_r:
-            free += 1
-        else:
-            busy += 1
-            if not has_t and has_r:
-                t_only_busy += 1
-            elif has_t and not has_r:
-                r_only_busy += 1
-
-    if free > 0:
-        reasons.append(
-            "Есть свободные слоты, но занятие не размещено — вероятен конфликт за педагога или кабинет с другими занятиями."
-        )
-        suggestions.append("Увеличить количество педагогов/кабинетов или сократить кол-во занятий")
-
-    if free == 0 and busy > 0:
-        parts = []
-        if t_only_busy:
-            parts.append(f"педагогов не хватает в {t_only_busy} из {len(od['positions'][:200])} проверенных слотов")
-        if r_only_busy:
-            parts.append(f"кабинетов не хватает в {r_only_busy} из {len(od['positions'][:200])} проверенных слотов")
-        if parts:
-            reasons.append("В доступное детям время " + ", ".join(parts) + ".")
-        else:
-            reasons.append("В доступное детям время педагоги и кабинеты заняты.")
-        suggestions.append("Расширить рабочие часы педагогов")
-        suggestions.append("Добавить кабинет")
-
-    suggestions += ["Изменить время занятия", "Уменьшить количество занятий"]
-    reason = " ".join(dict.fromkeys(reasons)) or "Занятие не удалось разместить."
-    return {"reason": reason, "suggestions": list(dict.fromkeys(suggestions))[:5]}
+    return diagnose(
+        lesson=lesson,
+        placements=placements,
+        slots=slot_positions,
+        student_windows=student_windows,
+        teacher_windows={tid: _abs_minutes(w, open_min) for tid, w in teacher_windows.items()},
+        room_windows={rid: _abs_minutes(w, open_min) for rid, w in room_windows.items()},
+        teacher_labels={tid: tc.name for tid, tc in teachers.items()},
+        room_labels={rid: rc.name for rid, rc in rooms.items()},
+        teacher_exists=bool(od["teachers"]),
+        room_exists=bool(od["all_rooms"]),
+    )
 
 
 def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -> ScheduleResult:
@@ -750,14 +828,25 @@ def run_schedule_generation(db: Session, schedule_name: str, week_start: date) -
     if not result.success:
         return result
 
+    students = _load_students(db)
     for fg in failed_groups:
+        student_name = students[fg.student_id].name if fg.student_id in students else ""
+        who = f" ({student_name})" if student_name else ""
         result.unscheduled.insert(
             0,
             UnscheduledInfo(
                 identifier=f"gr_{fg.lesson_request_id}",
-                name=fg.subject_name,
+                name=f"Групповое: {fg.subject_name}" + who,
                 reason=fg.reason,
-                suggestions=["Добавить ещё одного ребёнка на это направление"],
+                suggestions=[
+                    "Добавить ещё одного ученика на это направление с теми же часами",
+                    "Снизить минимальный размер группы в настройках оптимизатора",
+                ],
+                details=[
+                    f"Минимальный размер группы — {fg.min_size} чел., "
+                    f"максимальный — {fg.max_size}.",
+                    f"Длительность занятия: {fg.duration_minutes} мин.",
+                ],
                 level="info",
             ),
         )
@@ -832,5 +921,6 @@ def _load_students(db: Session) -> dict[int, StudentAvail]:
             db_id=s.id,
             name=f"{s.last_name} {s.first_name}".strip(),
             availability=av,
+            has_any_availability=bool(av),
         )
     return result

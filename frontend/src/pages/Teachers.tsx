@@ -29,8 +29,8 @@ import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import api from '../api/client'
-import type { Teacher, Subject, Availability as AvailType } from '../api/types'
-import { DayNames } from '../api/types'
+import type { Teacher, Subject } from '../api/types'
+import AvailabilityEditor from '../components/AvailabilityEditor'
 
 interface TeacherForm {
   first_name: string
@@ -59,10 +59,6 @@ export default function Teachers() {
 
   const [availOpen, setAvailOpen] = useState(false)
   const [availTeacherId, setAvailTeacherId] = useState<number | null>(null)
-  const [availabilities, setAvailabilities] = useState<AvailType[]>([])
-  const [newAvailDay, setNewAvailDay] = useState(0)
-  const [newAvailStart, setNewAvailStart] = useState('09:00')
-  const [newAvailEnd, setNewAvailEnd] = useState('18:00')
 
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false, msg: '', severity: 'success',
@@ -138,60 +134,21 @@ export default function Teachers() {
     setOpen(true)
   }
 
-  const openAvail = async (teacherId: number) => {
+  const openAvail = (teacherId: number) => {
     setAvailTeacherId(teacherId)
-    try {
-      const res = await api.get(`/availabilities?entity_type=teacher&entity_id=${teacherId}`)
-      setAvailabilities(res.data as AvailType[])
-    } catch {
-      setAvailabilities([])
-    }
     setAvailOpen(true)
-  }
-
-  const addAvailability = async () => {
-    if (!availTeacherId) return
-    try {
-      await api.post('/availabilities', {
-        entity_type: 'teacher',
-        entity_id: availTeacherId,
-        day_of_week: newAvailDay,
-        start_time: newAvailStart,
-        end_time: newAvailEnd,
-      })
-      const res = await api.get(`/availabilities?entity_type=teacher&entity_id=${availTeacherId}`)
-      setAvailabilities(res.data as AvailType[])
-      setSnackbar({ open: true, msg: 'Доступность добавлена', severity: 'success' })
-    } catch {
-      setSnackbar({ open: true, msg: 'Ошибка', severity: 'error' })
-    }
-  }
-
-  const deleteAvailability = async (availId: number) => {
-    try {
-      await api.delete(`/availabilities/${availId}`)
-      setAvailabilities((prev) => prev.filter((a) => a.id !== availId))
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
-      setSnackbar({ open: true, msg, severity: 'error' })
-    }
-  }
-
-  const deleteAllAvailability = async () => {
-    if (!availTeacherId) return
-    if (!confirm('Удалить всю доступность?')) return
-    try {
-      await api.delete(`/availabilities/bulk?entity_type=teacher&entity_id=${availTeacherId}`)
-      setAvailabilities([])
-      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
-      setSnackbar({ open: true, msg, severity: 'error' })
-    }
   }
 
   const getSubjectNames = (teacherSubjects: Subject[]) =>
     teacherSubjects.map((s) => s.name).join(', ') || '—'
+
+  const availTeacherName =
+    availTeacherId === null
+      ? ''
+      : (() => {
+          const t = items.find((tt) => tt.id === availTeacherId)
+          return t ? `${t.last_name} ${t.first_name}` : ''
+        })()
 
   return (
     <Box>
@@ -277,34 +234,18 @@ export default function Teachers() {
       </Dialog>
 
       <Dialog open={availOpen} onClose={() => setAvailOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Доступность педагога</DialogTitle>
+        <DialogTitle>
+          Доступность педагога
+          {availTeacherId !== null && availTeacherName ? `: ${availTeacherName}` : ''}
+        </DialogTitle>
         <DialogContent>
-          {availabilities.length === 0 ? (
-            <Typography color="text.secondary" sx={{ mb: 2 }}>Нет доступности</Typography>
-          ) : (
-            availabilities.map((a) => (
-              <Chip
-                key={a.id}
-                label={`${DayNames[a.day_of_week]}: ${a.start_time}–${a.end_time}`}
-                sx={{ mr: 1, mb: 1 }}
-                onDelete={() => deleteAvailability(a.id!)}
-              />
-            ))
-          )}
-          <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-            <FormControl sx={{ minWidth: 120 }}>
-              <InputLabel>День</InputLabel>
-              <Select value={newAvailDay} label="День" onChange={(e) => setNewAvailDay(Number(e.target.value))}>
-                {DayNames.map((d, i) => (
-                  <MenuItem key={i} value={i}>{d}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField label="Начало" type="time" value={newAvailStart} onChange={(e) => setNewAvailStart(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} sx={{ width: 120 }} />
-            <TextField label="Конец" type="time" value={newAvailEnd} onChange={(e) => setNewAvailEnd(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} sx={{ width: 120 }} />
-            <Button variant="outlined" size="small" onClick={addAvailability}>Добавить</Button>
-            <Button variant="outlined" size="small" color="error" onClick={deleteAllAvailability}>Очистить</Button>
-          </Box>
+          <AvailabilityEditor
+            entityType="teacher"
+            entityId={availTeacherId}
+            defaultStart="09:00"
+            defaultEnd="18:00"
+            onError={(msg) => setSnackbar({ open: true, msg, severity: 'error' })}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAvailOpen(false)}>Закрыть</Button>

@@ -116,6 +116,13 @@ export interface Availability {
   end_time: string
 }
 
+export interface AvailabilityBulkResult {
+  created: number
+  skipped: number
+  removed: number
+  items: Availability[]
+}
+
 export interface LessonRequestBase {
   id: number
   student_id: number
@@ -229,6 +236,8 @@ export interface UnscheduledItem {
   identifier: string
   name?: string | null
   reason: string
+  /** Подробности причины: конкретные часы, занятые ресурсы, параметры. */
+  details?: string[]
   suggestions?: string[]
   level?: string
 }

@@ -39,6 +39,7 @@ import type {
   StudentBase,
   ConflictDetail,
   Price,
+  UnscheduledItem,
 } from '../api/types'
 import { DayNames, DayNamesFull } from '../api/types'
 
@@ -102,7 +103,7 @@ export default function Schedule() {
 
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
   const [unscheduledReport, setUnscheduledReport] = useState('')
-  const [unscheduledItems, setUnscheduledItems] = useState<Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>>([])
+  const [unscheduledItems, setUnscheduledItems] = useState<UnscheduledItem[]>([])
 
   const [genErrorOpen, setGenErrorOpen] = useState(false)
   const [genErrorMsg, setGenErrorMsg] = useState('')
@@ -161,7 +162,7 @@ export default function Schedule() {
         scheduled_count: number
         unscheduled_count: number
         unscheduled_report?: string | null
-        unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>
+        unscheduled?: UnscheduledItem[]
       }
       const items = data.unscheduled || []
       const hasErrorItems = items.some((it) => !it.level || it.level !== 'info')
@@ -176,7 +177,7 @@ export default function Schedule() {
       setSelectedScheduleId(data.schedule_id)
       if (data.unscheduled_count > 0) {
         setUnscheduledReport(data.unscheduled_report || '')
-        setUnscheduledItems(items as Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>)
+        setUnscheduledItems(items as UnscheduledItem[])
         setUnscheduledOpen(true)
       }
     } catch (err: unknown) {
@@ -447,7 +448,7 @@ export default function Schedule() {
                   try {
                     const raw = currentSchedule.unscheduled_report ?? ''
                     const parsed = JSON.parse(raw) as {
-                      unscheduled?: Array<{ identifier: string; name?: string; reason: string; suggestions?: string[]; level?: string }>
+                      unscheduled?: UnscheduledItem[]
                     }
                     if (parsed.unscheduled) setUnscheduledItems(parsed.unscheduled)
                   } catch {
@@ -770,15 +771,35 @@ export default function Schedule() {
                   {item.name}
                 </Typography>
               )}
-              <Typography variant="body2" sx={{ mb: 1.5, lineHeight: 1.5 }}>
+              <Typography variant="body2" sx={{ mb: item.details && item.details.length > 0 ? 1 : 1.5, lineHeight: 1.5 }}>
                 {item.reason}
               </Typography>
-              {item.suggestions && item.suggestions.length > 0 && (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                  {item.suggestions.map((s, si) => (
-                    <Chip key={si} label={s} size="small" variant="outlined" color="primary" />
+              {item.details && item.details.length > 0 && (
+                <Box
+                  component="ul"
+                  sx={{
+                    m: 0,
+                    mb: 1.5,
+                    pl: 2.5,
+                    '& li': { fontSize: 13, color: 'text.secondary', lineHeight: 1.5, mb: 0.25 },
+                  }}
+                >
+                  {item.details.map((d, di) => (
+                    <li key={di}>{d}</li>
                   ))}
                 </Box>
+              )}
+              {item.suggestions && item.suggestions.length > 0 && (
+                <>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Что можно сделать:
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                    {item.suggestions.map((s, si) => (
+                      <Chip key={si} label={s} size="small" variant="outlined" color="primary" />
+                    ))}
+                  </Box>
+                </>
               )}
             </Paper>
           ))}

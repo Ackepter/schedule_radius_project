@@ -45,6 +45,9 @@ class FailedGroup:
     subject_id: int
     subject_name: str
     reason: str
+    duration_minutes: int = 60
+    min_size: int = 2
+    max_size: int = 8
 
 
 @dataclass
@@ -168,7 +171,11 @@ def _student_windows(db: Session, student_id: int, duration_minutes: int) -> lis
         )
     ).all()
     if not rows:
-        return []
+        # Доступность не задана — ученик считается свободным весь рабочий день,
+        # как это делает оптимизатор (StudentAvail.has_any_availability).
+        open_min = settings.center_open_hour * 60
+        close_min = settings.center_close_hour * 60
+        return [(d, open_min, close_min) for d in range(7)]
     by_day: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for r in rows:
         s = r.start_time.hour * 60 + r.start_time.minute
@@ -224,9 +231,13 @@ def form_groups(
                         student_id=m.req.student_id,
                         subject_id=subject_id,
                         subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
+                        duration_minutes=duration,
+                        min_size=min_size,
+                        max_size=max_size,
                         reason=(
-                            f"Возможна групповая форма, но у ребёнка нет свободного слота "
-                            f"длительностью {duration} мин."
+                            f"Групповое занятие по направлению «{subject_names.get(subject_id, subj_default_name(subject_id))}» "
+                            f"не сформировано: у ребёнка нет доступности либо в ней нет "
+                            f"свободного окна длительностью {duration} мин."
                         ),
                     )
                 )
@@ -253,15 +264,20 @@ def form_groups(
                 for m in c.members:
                     if not m.windows:
                         continue
+                    subj = subject_names.get(subject_id, subj_default_name(subject_id))
                     failed.append(
                         FailedGroup(
                             lesson_request_id=m.req.id,
                             student_id=m.req.student_id,
                             subject_id=subject_id,
-                            subject_name=subject_names.get(subject_id, subj_default_name(subject_id)),
+                            subject_name=subj,
+                            duration_minutes=duration,
+                            min_size=min_size,
+                            max_size=max_size,
                             reason=(
-                                f"Возможна групповая форма, но не хватает желающих: "
-                                f"нужно минимум {min_size} учеников с общими слотами."
+                                f"Групповое занятие по направлению «{subj}» не сформировано: "
+                                f"нужно минимум {min_size} учеников с пересекающимися часами, "
+                                f"а таких нашлось {len(c.members)}."
                             ),
                         )
                     )

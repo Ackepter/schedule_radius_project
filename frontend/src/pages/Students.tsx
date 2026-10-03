@@ -31,11 +31,11 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
-import CloseIcon from '@mui/icons-material/Close'
 import api from '../api/client'
-import type { StudentBase, StudentList, Parent, Subject, Teacher, Availability as AvailType } from '../api/types'
-import { LessonTypeEnum, DayNames } from '../api/types'
+import type { StudentBase, StudentList, Parent, Subject, Teacher } from '../api/types'
+import { LessonTypeEnum } from '../api/types'
 import type { LessonRequestBase } from '../api/types'
+import AvailabilityEditor from '../components/AvailabilityEditor'
 
 interface StudentForm {
   first_name: string
@@ -105,10 +105,6 @@ export default function Students() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detail, setDetail] = useState<StudentList | null>(null)
   const [detailTab, setDetailTab] = useState(0)
-  const [availabilities, setAvailabilities] = useState<AvailType[]>([])
-  const [newAvailDay, setNewAvailDay] = useState(0)
-  const [newAvailStart, setNewAvailStart] = useState('09:00')
-  const [newAvailEnd, setNewAvailEnd] = useState('12:00')
 
   const [snackbar, setSnackbar] = useState<{ open: boolean; msg: string; severity: 'success' | 'error' }>({
     open: false, msg: '', severity: 'success',
@@ -194,61 +190,8 @@ export default function Students() {
       setDetail(res.data as StudentList)
       setDetailTab(0)
       setDetailOpen(true)
-      loadAvailabilities(id)
     } catch {
       setSnackbar({ open: true, msg: 'Ошибка загрузки', severity: 'error' })
-    }
-  }
-
-  const loadAvailabilities = async (studentId: number) => {
-    try {
-      const res = await api.get(`/availabilities?entity_type=student&entity_id=${studentId}`)
-      setAvailabilities(res.data as AvailType[])
-    } catch {
-      // ignore
-    }
-  }
-
-  const addAvailability = async () => {
-    if (!detail) return
-    try {
-      await api.post('/availabilities', {
-        entity_type: 'student',
-        entity_id: detail.id,
-        day_of_week: newAvailDay,
-        start_time: newAvailStart,
-        end_time: newAvailEnd,
-      })
-      setSnackbar({ open: true, msg: 'Доступность добавлена', severity: 'success' })
-      loadAvailabilities(detail.id)
-    } catch {
-      setSnackbar({ open: true, msg: 'Ошибка добавления доступности', severity: 'error' })
-    }
-  }
-
-  const deleteAvailability = async (availId: number | null | undefined) => {
-    if (availId == null) return
-    if (!confirm('Удалить эту доступность?')) return
-    try {
-      await api.delete(`/availabilities/${availId}`)
-      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
-      setAvailabilities((prev) => prev.filter((a) => a.id !== availId))
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
-      setSnackbar({ open: true, msg, severity: 'error' })
-    }
-  }
-
-  const deleteAllAvailability = async () => {
-    if (!detail) return
-    if (!confirm('Удалить всю доступность?')) return
-    try {
-      await api.delete(`/availabilities/bulk?entity_type=student&entity_id=${detail.id}`)
-      setSnackbar({ open: true, msg: 'Доступность удалена', severity: 'success' })
-      loadAvailabilities(detail.id)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Ошибка удаления'
-      setSnackbar({ open: true, msg, severity: 'error' })
     }
   }
 
@@ -555,51 +498,13 @@ export default function Students() {
           )}
 
           {detailTab === 1 && detail && (
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>Доступные дни/время:</Typography>
-              {availabilities.length === 0 ? (
-                <Typography color="text.secondary">Нет доступности</Typography>
-              ) : (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {availabilities.map((a) => (
-                    <Chip
-                      key={a.id}
-                      label={`${DayNames[a.day_of_week]}: ${a.start_time}–${a.end_time}`}
-                      onDelete={() => void deleteAvailability(a.id)}
-                      deleteIcon={<CloseIcon />}
-                    />
-                  ))}
-                </Box>
-              )}
-              <Box sx={{ mt: 2, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                <FormControl sx={{ minWidth: 120 }}>
-                  <InputLabel>День</InputLabel>
-                  <Select value={newAvailDay} label="День" onChange={(e) => setNewAvailDay(Number(e.target.value))}>
-                    {DayNames.map((d, i) => (
-                      <MenuItem key={i} value={i}>{d}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <TextField
-                  label="Начало"
-                  type="time"
-                  value={newAvailStart}
-                  onChange={(e) => setNewAvailStart(e.target.value)}
-                  slotProps={{ inputLabel: { shrink: true } }}
-                  sx={{ width: 120 }}
-                />
-                <TextField
-                  label="Конец"
-                  type="time"
-                  value={newAvailEnd}
-                  onChange={(e) => setNewAvailEnd(e.target.value)}
-                  slotProps={{ inputLabel: { shrink: true } }}
-                  sx={{ width: 120 }}
-                />
-                <Button variant="outlined" size="small" onClick={addAvailability}>Добавить</Button>
-                <Button variant="outlined" size="small" color="error" onClick={deleteAllAvailability}>Очистить</Button>
-              </Box>
-            </Box>
+            <AvailabilityEditor
+              entityType="student"
+              entityId={detail.id}
+              defaultStart="09:00"
+              defaultEnd="18:00"
+              onError={(msg) => setSnackbar({ open: true, msg, severity: 'error' })}
+            />
           )}
         </DialogContent>
         <DialogActions>

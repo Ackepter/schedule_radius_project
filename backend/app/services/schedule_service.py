@@ -67,6 +67,7 @@ def generate_schedule(db: Session, name: str, week_start: date) -> ScheduleGener
                 "name": u.name,
                 "reason": u.reason,
                 "suggestions": u.suggestions,
+                "details": u.details,
                 "level": u.level,
             }
             for u in result.unscheduled
@@ -86,7 +87,12 @@ def generate_schedule(db: Session, name: str, week_start: date) -> ScheduleGener
         unscheduled_report=json.dumps(report_payload, ensure_ascii=False),
         unscheduled=[
             UnscheduledLessonReport(
-                identifier=u.identifier, name=u.name, reason=u.reason, suggestions=u.suggestions, level=u.level
+                identifier=u.identifier,
+                name=u.name,
+                reason=u.reason,
+                suggestions=u.suggestions,
+                level=u.level,
+                details=u.details,
             )
             for u in result.unscheduled
         ],

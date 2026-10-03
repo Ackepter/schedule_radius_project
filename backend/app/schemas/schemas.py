@@ -247,6 +247,39 @@ class AvailabilityUpdate(SchemaBase):
         return self
 
 
+class AvailabilityBulkCreate(SchemaBase):
+    """Один и тот же интервал сразу на несколько дней недели."""
+
+    entity_type: EntityTypeEnum
+    entity_id: int = Field(..., ge=1)
+    days: list[int] = Field(..., min_length=1)
+    start_time: time
+    end_time: time
+    replace: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> "AvailabilityBulkCreate":
+        if self.start_time >= self.end_time:
+            raise ValueError("start_time must be earlier than end_time")
+        bad = [d for d in self.days if d < 0 or d > 6]
+        if bad:
+            raise ValueError(f"days must be within 0..6, got {bad}")
+        if not self.days:
+            raise ValueError("days must contain at least one day")
+        return self
+
+    @property
+    def unique_days(self) -> list[int]:
+        return sorted(set(self.days))
+
+
+class AvailabilityBulkResult(SchemaBase):
+    created: int
+    skipped: int
+    removed: int = 0
+    items: list[AvailabilityBase] = []
+
+
 # ---------------------------------------------------------------------------
 # LessonRequest
 # ---------------------------------------------------------------------------
@@ -593,6 +626,7 @@ class UnscheduledLessonReport(SchemaBase):
     reason: str
     suggestions: list[str] = []
     level: str = "error"
+    details: list[str] = []
 
 
 class ScheduleGenerateResponse(SchemaBase):
