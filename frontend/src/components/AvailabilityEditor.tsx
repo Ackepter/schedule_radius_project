@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -16,10 +16,16 @@ import {
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import api from '../api/client'
 import type { Availability as AvailType, EntityType, OptimizerSettings } from '../api/types'
-import { DayNames, DayNamesFull } from '../api/types'
-
-const WEEKDAYS = [0, 1, 2, 3, 4]
-const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
+import { DayNames } from '../api/types'
+import {
+  ALL_DAYS,
+  clampChips,
+  dayRanges,
+  describeWindow,
+  sameDays,
+  toggleDay,
+  WEEKDAYS,
+} from './availabilityFormat'
 
 interface DayPreset {
   label: string
@@ -52,33 +58,6 @@ function toMinutes(t: string): number {
   return (h || 0) * 60 + (m || 0)
 }
 
-function sameDays(a: number[], b: number[]): boolean {
-  if (a.length !== b.length) return false
-  const sa = [...a].sort((x, y) => x - y)
-  const sb = [...b].sort((x, y) => x - y)
-  return sa.every((v, i) => v === sb[i])
-}
-
-function describeWindow(items: AvailType[]): string {
-  const byDay = new Map<number, AvailType[]>()
-  for (const item of items) {
-    const list = byDay.get(item.day_of_week) ?? []
-    list.push(item)
-    byDay.set(item.day_of_week, list)
-  }
-  return [...byDay.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([day, list]) => {
-      const windows = list
-        .slice()
-        .sort((a, b) => a.start_time.localeCompare(b.start_time))
-        .map((w) => `${w.start_time}–${w.end_time}`)
-        .join(', ')
-      return `${DayNames[day]} ${windows}`
-    })
-    .join(' · ')
-}
-
 /**
  * Редактор доступности: один интервал можно заполнить сразу на несколько дней
  * недели (например, Пн–Пт 08:00–19:00), либо точечно по одному дню.
@@ -103,15 +82,27 @@ export default function AvailabilityEditor({
     severity: 'success',
   })
 
+  // onError передаётся инлайном из родителя, поэтому его идентичность меняется
+  // на каждом рендере. Через ref он не «расшатывает» useCallback ниже, иначе
+  // effect загрузки зацикливался: ошибка -> setSnackbar в родителе -> рендер ->
+  // новый onError -> новая load -> повторный запрос -> ... (вкладка зависала).
+  const onErrorRef = useRef(onError)
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+
   const report = useCallback(
     (msg: string, severity: 'success' | 'error') => {
-      if (severity === 'error' && onError) onError(msg)
+      if (severity === 'error') onErrorRef.current?.(msg)
       setSnackbar({ open: true, msg, severity })
     },
-    [onError],
+    [],
   )
 
+  // Ключ смены сущности: пока он тот же, повторно дёргать сервер незачем.
+  const requestSeq = useRef(0)
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current
     if (!entityId) {
       setItems([])
       return
@@ -120,8 +111,12 @@ export default function AvailabilityEditor({
       const res = await api.get(
         `/availabilities?entity_type=${entityType}&entity_id=${entityId}`,
       )
-      setItems(res.data as AvailType[])
+      if (seq !== requestSeq.current) return
+      // сервер отдаёт {items,total}; клиент unwrap-ит, но подстрахуемся
+      const data = res.data
+      setItems(Array.isArray(data) ? (data as AvailType[]) : [])
     } catch {
+      if (seq !== requestSeq.current) return
       setItems([])
       report('Ошибка загрузки доступности', 'error')
     }
@@ -160,26 +155,27 @@ export default function AvailabilityEditor({
     [items],
   )
 
-  const daysLabel = useMemo(() => {
-    if (selectedDays.length === 0) return 'дни не выбраны'
-    return [...selectedDays]
-      .sort((a, b) => a - b)
-      .map((d) => DayNamesFull[d])
-      .join(', ')
-  }, [selectedDays])
+  const windowLines = useMemo(() => describeWindow(sortedItems), [sortedItems])
+
+  // при большом числе записей рендер всех чипов подвешивает страницу
+  const { visible: visibleItems, hidden: hiddenCount } = clampChips(sortedItems)
+
+  const daysLabel = useMemo(
+    () => (selectedDays.length === 0 ? 'дни не выбраны' : dayRanges(selectedDays)),
+    [selectedDays],
+  )
 
   const activePreset = useMemo(
     () => PRESETS.find((p) => sameDays(p.days, selectedDays))?.label ?? null,
     [selectedDays],
   )
 
-  const canSubmit = entityId !== null && selectedDays.length > 0 && !saving
+  const invalidRange = start >= end
+  const canSubmit = entityId !== null && selectedDays.length > 0 && !saving && !invalidRange
 
-  const toggleDay = (_e: React.MouseEvent<HTMLElement>, value: number | null) => {
+  const toggleDayClick = (_e: React.MouseEvent<HTMLElement>, value: number | null) => {
     if (value === null) return
-    setSelectedDays((prev) =>
-      prev.includes(value) ? prev.filter((d) => d !== value) : [...prev, value].sort((a, b) => a - b),
-    )
+    setSelectedDays((prev) => toggleDay(prev, value))
   }
 
   const addBulk = async () => {
@@ -255,7 +251,7 @@ export default function AvailabilityEditor({
         </Typography>
       ) : (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 0.5 }}>
-          {sortedItems.map((a) => (
+          {visibleItems.map((a) => (
             <Chip
               key={a.id}
               size="small"
@@ -265,11 +261,21 @@ export default function AvailabilityEditor({
               onDelete={() => void removeOne(a.id)}
             />
           ))}
+          {hiddenCount > 0 && (
+            <Chip size="small" label={`и ещё ${hiddenCount}…`} />
+          )}
         </Box>
       )}
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-        {describeWindow(sortedItems) || '—'}
-      </Typography>
+      {windowLines.length > 0 && (
+        <Box
+          component="ul"
+          sx={{ m: 0, mb: 2, pl: 2.5, '& li': { fontSize: 12, color: 'text.secondary', lineHeight: 1.6 } }}
+        >
+          {windowLines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </Box>
+      )}
 
       <Typography variant="subtitle2" gutterBottom>
         Заполнить одни и те же часы
@@ -290,7 +296,7 @@ export default function AvailabilityEditor({
 
       <ToggleButtonGroup
         value={selectedDays}
-        onChange={toggleDay}
+        onChange={toggleDayClick}
         size="small"
         sx={{ mb: 2, flexWrap: 'wrap', gap: 0.5, '& .MuiToggleButtonGroup-grouped': { border: '1px solid !important', borderRadius: '18px !important', margin: '0 !important' } }}
       >
@@ -343,9 +349,11 @@ export default function AvailabilityEditor({
         </Button>
       </Box>
 
-      <Alert severity="info" icon={false} sx={{ py: 0 }}>
-        Будет сохранено {start}–{end} для дней: {daysLabel}
-        {windowHours && (
+      <Alert severity={invalidRange ? 'error' : 'info'} icon={false} sx={{ py: 0 }}>
+        {invalidRange
+          ? 'Время начала должно быть раньше времени окончания'
+          : `Будет сохранено ${start}–${end} для дней: ${daysLabel}`}
+        {!invalidRange && windowHours && (
           <>
             {' '}
             Расписание строится в интервале {windowHours.from}–{windowHours.to}; время вне него

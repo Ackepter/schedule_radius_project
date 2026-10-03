@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "check:availability": "node --experimental-strip-types check-availability.mts",
+    "check:loop": "node --experimental-strip-types check-loop.mts",
     "preview": "vite preview"
   },
   "dependencies": {
